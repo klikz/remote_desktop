@@ -2,7 +2,10 @@
 //! restore token bilan DIALOGSIZ (qarovsiz) ishlaydimi?
 //!
 //! Foydalanish:
-//!   portal-probe [--delay SEKUND] [--no-input] [--reset]
+//!   portal-probe [--delay SEKUND] [--watch SEKUND] [--no-input] [--reset]
+//!
+//!   --watch N: sessiyani N soniya ochiq ushlab, har 2 soniyada kursorni 1 px surib
+//!   (ok/xato chiqaradi). Shu vaqt ichida ekranni qulflab/ochib sinang.
 //!
 //! Dastur ScreenCast + RemoteDesktop sessiyasini ochadi, olingan restore token'ni saqlaydi
 //! va (ixtiyoriy) kursorni 30 px o'ngga surib, orqaga qaytaradi.
@@ -41,12 +44,14 @@ mod imp {
 
     pub async fn run(args: Vec<String>) -> Result<()> {
         let mut delay: u64 = 0;
+        let mut watch: u64 = 0;
         let mut no_input = false;
         let mut reset = false;
         let mut it = args.iter();
         while let Some(a) = it.next() {
             match a.as_str() {
                 "--delay" => delay = it.next().context("--delay uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
+                "--watch" => watch = it.next().context("--watch uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
                 "--no-input" => no_input = true,
                 "--reset" => reset = true,
                 other => anyhow::bail!("noma'lum argument: {other}"),
@@ -147,6 +152,21 @@ mod imp {
             remote_desktop.notify_pointer_motion(&session, 30.0, 0.0).await.context("notify_pointer_motion xatosi")?;
             tokio::time::sleep(Duration::from_millis(600)).await;
             remote_desktop.notify_pointer_motion(&session, -30.0, 0.0).await.context("notify_pointer_motion xatosi")?;
+        }
+
+        if watch > 0 {
+            println!("Kuzatuv: {watch} soniya. Hozir ekranni qulflab (Super+L), keyin oching...");
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_secs(watch) {
+                let t = start.elapsed().as_secs();
+                let a = remote_desktop.notify_pointer_motion(&session, 1.0, 0.0).await;
+                let b = remote_desktop.notify_pointer_motion(&session, -1.0, 0.0).await;
+                match (a, b) {
+                    (Ok(_), Ok(_)) => println!("t={t:>3}s: kiritish ok"),
+                    (Err(e), _) | (_, Err(e)) => println!("t={t:>3}s: kiritish XATO: {e}"),
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
         }
 
         tokio::time::sleep(Duration::from_secs(2)).await;

@@ -94,10 +94,11 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 ### Bosqich 2. Linux Host: ekran olish va kodlash
 
 **Go/no-go tekshiruv (birinchi qilinadi).** Q6 sababli qarovsiz ishlash Ubuntu 26.04'da amalda ishlashi kerak. Kichik prototip bilan tekshiramiz, shundan keyingina qolgan ishga o'tamiz.
-- [~] Prototip: `crates/portal-probe` (ashpd 0.11) yozildi: ScreenCast + RemoteDesktop bitta sessiyada, restore token saqlash, kursorni surish sinovi. Ubuntu: GNOME Shell 50.1, xdg-desktop-portal 1.21.1, portal-gnome 50.0, PipeWire 1.6.2, libei 1.5. Foydalanuvchi build qilib sinashi kerak
-- [ ] Birinchi marta ruxsat berish (foydalanuvchi oldida), restore token saqlash
-- [ ] Qayta ishga tushirishdan keyin token bilan **dialogsiz** sessiya ochilishini tekshirish (ham ekran, ham kiritish)
-- [ ] Ekran qulflanganda, o'chganda va uyquga ketganda holatni tekshirish
+- [~] Prototip: `crates/portal-probe` (ashpd 0.11) yozildi: ScreenCast + RemoteDesktop bitta sessiyada, restore token saqlash, kursorni surish sinovi. Ubuntu: GNOME Shell 50.1, xdg-desktop-portal 1.21.1, portal-gnome 50.0, PipeWire 1.6.2, libei 1.5. Ubuntu'da build va ishga tushirildi: ScreenCast + RemoteDesktop bitta sessiyada ochiladi (monitor oqimi 2880x1620, node 78)
+- [x] Birinchi marta ruxsat berish (foydalanuvchi oldida), restore token saqlash. Eslatma: `persist` faqat `select_devices`da beriladi, `select_sources`da `DoNot` bo'lishi shart (aks holda `Remote desktop sessions cannot persist` xatosi)
+- [~] Token bilan **dialogsiz** sessiya ochilishi: ilovani qayta ishga tushirganda tasdiqlandi (javob 0.05 s, ekran + klaviatura + sichqoncha). Sichqoncha kiritishi ham dialogsiz ishladi (kursor siljidi, foydalanuvchi tasdiqladi). Kompyuterni qayta yuklagandan keyin hali tekshirilmagan
+  - Muhim: portal har sessiyada YANGI token qaytaradi, eskisi bilan almashtirib saqlash kerak (har start'dan keyin darhol, atomik yozish)
+- [~] Ekran qulflanganda, o'chganda va uyquga ketganda holatni tekshirish. **Topildi:** ekran qulflanganda YANGI sessiya yaratib bo'lmaydi (`sessiya yaratilmadi: Portal request didn't succeed: Other`). Sintetik kursor harakati o'chgan ekranni yoqadi. Hali tekshirilmagan: (a) qulfdan oldin ochilgan sessiya qulf/ochilishda ishlaydimi (`--watch`), (b) qulf o'chirilgan, lekin ekran o'chgan (blank) holatda sessiya ochiladimi
 - [ ] Natijani hujjatlash. Agar dialogsiz ishlamasa: muqobil yo'l tanlanadi (masalan GNOME'ning o'z remote desktop xizmati asosida, yoki libei) va reja yangilanadi
 
 - [ ] ScreenCast portali orqali sessiya ochish (GNOME'da ruxsat dialogi)
@@ -183,6 +184,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 |---|---|
 | 2026-10-29 | Reja tuzildi, qarorlar qabul qilindi |
 | 2026-10-29 | Bosqich 0 deyarli tayyor: workspace, git, build skriptlari yaratildi. Bo'sh workspace Linux'da `cargo test` va `cargo build --release` bilan tekshirildi. Qolgan: foydalanuvchi Rust'ni o'rnatadi |
+| 2026-10-29 | Bosqich 2 prototipi Ubuntu 26.04 (GNOME 50.1) da: restore token ilovani qayta ishga tushirishda dialogsiz ishladi. Qayta yuklash va ekran qulfi sinovlari kutilmoqda |
 | 2026-10-29 | **Bosqich 1 yopildi.** Haqiqiy tarmoqda Windows Viewer Ubuntu Host'ga ulandi, autentifikatsiya va ping ishladi (ping ~2 ms LAN'da) |
 | 2026-10-29 | `cargo test --workspace` Windows va Ubuntu'da muvaffaqiyatli o'tdi. Bosqich 1 avtomatik testlari tayyor. Qoldi: Windows Viewer -> Ubuntu Host qo'lda ulanish sinovi (haqiqiy tarmoq orqali) |
 | 2026-10-29 | Bosqich 1 kodi yozildi (protokol, auth, QUIC server/klient, CLI). Protokol va std-only modullarning 23 ta testi Claude tomonda o'tdi, tarmoq/kripto qismi faqat sintaksis jihatdan tekshirildi. Kompilyatsiya va testlar foydalanuvchi kompyuterida kutilmoqda |
