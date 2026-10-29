@@ -22,11 +22,12 @@ const USAGE: &str = "\
 viewer-windows: Remote Desktop Viewer
 
 Foydalanish:
-  viewer-windows connect <manzil[:port]> [--view] [--video SEKUND] [--fps N] [--kbps N] [--height N] [--out FAYL.h264]
+  viewer-windows connect <manzil[:port]> [--view] [--video SEKUND] [--fps N] [--kbps N] [--height N] [--monitor N] [--out FAYL.h264]
 
 Misollar:
   viewer-windows connect 192.168.2.226                 ulanish va ping sinovi
   viewer-windows connect 192.168.2.226 --view          videoni oynada ko'rsatish (Esc - chiqish)
+  viewer-windows connect 192.168.2.226 --view --monitor 1   (0 = birinchi monitor, Host logida ro'yxat)
   viewer-windows connect 192.168.2.226 --view --height 720 --fps 30 --kbps 3000
   viewer-windows connect 192.168.2.226 --video 10      10 soniya video qabul qilib statistika chiqarish
   viewer-windows connect 192.168.2.226 --video 10 --out test.h264
@@ -37,6 +38,7 @@ struct Options {
     fps: u16,
     kbps: u32,
     max_height: u16,
+    monitor: u8,
     view: bool,
     out: Option<PathBuf>,
 }
@@ -46,7 +48,7 @@ async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match (args.first().map(String::as_str), args.get(1)) {
         (Some("connect"), Some(target)) => {
-            let mut opts = Options { video_secs: 0, fps: 30, kbps: 10000, max_height: 1080, view: false, out: None };
+            let mut opts = Options { video_secs: 0, fps: 30, kbps: 10000, max_height: 1080, monitor: 0, view: false, out: None };
             let mut it = args[2..].iter();
             while let Some(a) = it.next() {
                 match a.as_str() {
@@ -54,6 +56,7 @@ async fn main() -> Result<()> {
                     "--fps" => opts.fps = it.next().context("--fps uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
                     "--kbps" => opts.kbps = it.next().context("--kbps uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
                     "--height" => opts.max_height = it.next().context("--height uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
+                    "--monitor" => opts.monitor = it.next().context("--monitor uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
                     "--view" => opts.view = true,
                     "--out" => opts.out = Some(PathBuf::from(it.next().context("--out uchun yo'l kerak")?)),
                     other => bail!("noma'lum argument: {other}\n\n{USAGE}"),
@@ -120,7 +123,7 @@ async fn run_connect(target: &str, opts: Options) -> Result<()> {
     println!("Ulandi. Host imkoniyatlari: {:?}", session.host_caps);
 
     if opts.view {
-        view::run(&mut session, opts.fps, opts.kbps, opts.max_height).await?;
+        view::run(&mut session, opts.fps, opts.kbps, opts.max_height, opts.monitor).await?;
     } else if opts.video_secs > 0 {
         receive_video(&mut session, &opts).await?;
     } else {
@@ -139,7 +142,7 @@ async fn run_connect(target: &str, opts: Options) -> Result<()> {
 async fn receive_video(session: &mut rdcore::client::Session, opts: &Options) -> Result<()> {
     println!("Video so'ralmoqda: {} FPS, {} kbit/s...", opts.fps, opts.kbps);
     let requested = Instant::now();
-    let mut stream = session.request_video(opts.fps, opts.kbps, opts.max_height).await?;
+    let mut stream = session.request_video(opts.fps, opts.kbps, opts.max_height, opts.monitor).await?;
     println!(
         "Host videoni boshladi (kodek {}, {} FPS, {} kbit/s). {} soniya qabul qilinadi...",
         stream.codec, stream.fps, stream.kbps, opts.video_secs

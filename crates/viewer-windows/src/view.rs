@@ -23,9 +23,9 @@ struct Picture {
 
 type Slot = Arc<Mutex<Option<Picture>>>;
 
-pub async fn run(session: &mut Session, fps: u16, kbps: u32, max_height: u16) -> Result<()> {
+pub async fn run(session: &mut Session, fps: u16, kbps: u32, max_height: u16, monitor: u8) -> Result<()> {
     println!("Video so'ralmoqda: {fps} FPS, {kbps} kbit/s, balandlik {max_height}...");
-    let mut stream = session.request_video(fps, kbps, max_height).await?;
+    let mut stream = session.request_video(fps, kbps, max_height, monitor).await?;
     println!("Host videoni boshladi (kodek {}). Chiqish: Esc yoki oynani yoping.", stream.codec);
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -113,43 +113,83 @@ pub async fn run(session: &mut Session, fps: u16, kbps: u32, max_height: u16) ->
     Ok(())
 }
 
+/// Kadrni oyna o'lchamiga nisbatni saqlab sig'diradi. Kichraytirishda "quti" filtri (o'rtacha),
+/// kattalashtirishda eng yaqin piksel. Qolgan joy qora.
+fn fit_scale(src: &Picture, ww: usize, wh: usize, out: &mut Vec<u32>) {
+    out.clear();
+    out.resize(ww * wh, 0);
+    if ww == 0 || wh == 0 || src.w == 0 || src.h == 0 {
+        return;
+    }
+    let scale = (ww as f64 / src.w as f64).min(wh as f64 / src.h as f64);
+    let dw = ((src.w as f64 * scale) as usize).clamp(1, ww);
+    let dh = ((src.h as f64 * scale) as usize).clamp(1, wh);
+    let (ox, oy) = ((ww - dw) / 2, (wh - dh) / 2);
+    for y in 0..dh {
+        let sy0 = y * src.h / dh;
+        let sy1 = ((y + 1) * src.h / dh).clamp(sy0 + 1, src.h);
+        for x in 0..dw {
+            let sx0 = x * src.w / dw;
+            let sx1 = ((x + 1) * src.w / dw).clamp(sx0 + 1, src.w);
+            let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
+            for sy in sy0..sy1 {
+                for p in &src.pixels[sy * src.w + sx0..sy * src.w + sx1] {
+                    r += (p >> 16) & 0xff;
+                    g += (p >> 8) & 0xff;
+                    b += p & 0xff;
+                }
+            }
+            let n = ((sy1 - sy0) * (sx1 - sx0)) as u32;
+            out[(oy + y) * ww + ox + x] = ((r / n) << 16) | ((g / n) << 8) | (b / n);
+        }
+    }
+}
+
 fn window_loop(slot: Slot, stop: Arc<AtomicBool>) -> Result<()> {
     let mut window: Option<Window> = None;
-    let mut size = (0usize, 0usize);
     let mut shown: Option<Picture> = None;
+    let mut dirty = false;
+    let mut last_size = (0usize, 0usize);
+    let mut buf: Vec<u32> = Vec::new();
 
     while !stop.load(Ordering::Relaxed) {
         if let Some(p) = slot.lock().unwrap().take() {
             shown = Some(p);
+            dirty = true;
         }
-        if let Some(p) = &shown {
-            if window.is_none() || size != (p.w, p.h) {
-                let scale = (1920.0 / p.w as f64).min(1000.0 / p.h as f64).min(1.0);
-                let (ww, wh) = (((p.w as f64) * scale) as usize, ((p.h as f64) * scale) as usize);
-                let mut w = Window::new(
-                    "Remote Desktop",
-                    ww.max(160),
-                    wh.max(90),
-                    WindowOptions {
-                        resize: true,
-                        scale_mode: ScaleMode::AspectRatioStretch,
-                        ..WindowOptions::default()
-                    },
-                )
-                .context("oyna yaratilmadi")?;
-                w.set_target_fps(120);
-                window = Some(w);
-                size = (p.w, p.h);
-            }
+        let Some(p) = &shown else {
+            std::thread::sleep(Duration::from_millis(5));
+            continue;
+        };
+        if window.is_none() {
+            let scale = (1920.0 / p.w as f64).min(1000.0 / p.h as f64).min(1.0);
+            let (ww, wh) = (((p.w as f64) * scale) as usize, ((p.h as f64) * scale) as usize);
+            let mut w = Window::new(
+                "Remote Desktop",
+                ww.max(160),
+                wh.max(90),
+                WindowOptions { resize: true, scale_mode: ScaleMode::Stretch, ..WindowOptions::default() },
+            )
+            .context("oyna yaratilmadi")?;
+            w.set_target_fps(120);
+            window = Some(w);
         }
-        match (&mut window, &shown) {
-            (Some(w), Some(p)) => {
-                if !w.is_open() || w.is_key_down(Key::Escape) {
-                    break;
-                }
-                w.update_with_buffer(&p.pixels, p.w, p.h).context("oyna yangilanmadi")?;
-            }
-            _ => std::thread::sleep(Duration::from_millis(5)),
+        let w = window.as_mut().unwrap();
+        if !w.is_open() || w.is_key_down(Key::Escape) {
+            break;
+        }
+        let size = w.get_size();
+        if size.0 == 0 || size.1 == 0 {
+            w.update();
+            continue;
+        }
+        if dirty || size != last_size {
+            fit_scale(p, size.0, size.1, &mut buf);
+            last_size = size;
+            dirty = false;
+            w.update_with_buffer(&buf, size.0, size.1).context("oyna yangilanmadi")?;
+        } else {
+            w.update();
         }
     }
     Ok(())

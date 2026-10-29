@@ -149,7 +149,7 @@ pub enum Message {
     /// Ulanishni tartibli yopish.
     Bye { reason: u8 },
     /// Viewer -> Host: videoni boshlashni so'raydi. `max_height`: 0 = asl o'lcham, aks holda shu balandlikka kichraytiriladi.
-    VideoRequest { fps: u16, kbps: u32, max_height: u16 },
+    VideoRequest { fps: u16, kbps: u32, max_height: u16, monitor: u8 },
     /// Host -> Viewer: video boshlandi. Kadrlar Host ochgan bir yo'nalishli oqimda keladi.
     VideoStarted { codec: u8, fps: u16, kbps: u32 },
     /// Host -> Viewer: videoni boshlab bo'lmadi (`video_reason`).
@@ -310,11 +310,12 @@ impl Message {
                 out.push(TAG_BYE);
                 out.push(*reason);
             }
-            Message::VideoRequest { fps, kbps, max_height } => {
+            Message::VideoRequest { fps, kbps, max_height, monitor } => {
                 out.push(TAG_VIDEO_REQUEST);
                 out.extend_from_slice(&fps.to_be_bytes());
                 out.extend_from_slice(&kbps.to_be_bytes());
                 out.extend_from_slice(&max_height.to_be_bytes());
+                out.push(*monitor);
             }
             Message::VideoStarted { codec, fps, kbps } => {
                 out.push(TAG_VIDEO_STARTED);
@@ -380,6 +381,7 @@ impl Message {
                 fps: r.u16()?,
                 kbps: r.u32()?,
                 max_height: r.u16()?,
+                monitor: r.u8()?,
             },
             TAG_VIDEO_STARTED => Message::VideoStarted {
                 codec: r.u8()?,
@@ -452,7 +454,7 @@ mod tests {
             Message::Ping { id: u64::MAX, sent_ms: 123456789 },
             Message::Pong { id: 42, sent_ms: 0 },
             Message::Bye { reason: 0 },
-            Message::VideoRequest { fps: 30, kbps: 4000, max_height: 1080 },
+            Message::VideoRequest { fps: 30, kbps: 4000, max_height: 1080, monitor: 1 },
             Message::VideoStarted { codec: CODEC_H264, fps: 60, kbps: u32::MAX },
             Message::VideoFailed { reason: video_reason::NO_CAPTURE },
         ]

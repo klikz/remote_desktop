@@ -17,10 +17,24 @@ pub struct StreamInfo {
     /// PipeWire ulanishi (fd). Egalikni kodlagich oladi.
     pub fd: OwnedFd,
     pub node_id: u32,
+    /// Tanlangan monitor tartib raqami, monitorlar soni va tanlangan monitor o'lchami.
+    pub index: usize,
+    pub count: usize,
+    pub width: i32,
+    pub height: i32,
+}
+
+#[derive(Clone, Copy)]
+struct Mon {
+    node_id: u32,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
 }
 
 enum Cmd {
-    OpenStream(oneshot::Sender<Result<StreamInfo>>),
+    OpenStream(usize, oneshot::Sender<Result<StreamInfo>>),
 }
 
 #[derive(Clone)]
@@ -36,10 +50,10 @@ impl PortalHandle {
     }
 
     /// Ekran oqimi uchun PipeWire ulanishini so'raydi (kerak bo'lsa sessiyani ochadi).
-    pub async fn open_stream(&self) -> Result<StreamInfo> {
+    pub async fn open_stream(&self, monitor: usize) -> Result<StreamInfo> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
-            .send(Cmd::OpenStream(reply_tx))
+            .send(Cmd::OpenStream(monitor, reply_tx))
             .await
             .map_err(|_| anyhow!("portal vazifasi to'xtagan"))?;
         reply_rx.await.map_err(|_| anyhow!("portal vazifasi javob bermadi"))?
@@ -111,26 +125,38 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             if let Some(t) = started.restore_token() {
                 save_token(&token_path, t)?;
             }
-            let node = started
+            let mut mons: Vec<Mon> = started
                 .streams()
                 .unwrap_or_default()
-                .first()
-                .map(|s| s.pipe_wire_node_id())
-                .context("portal oqim bermadi")?;
-            Ok::<_, anyhow::Error>((rd, sc, session, node))
+                .iter()
+                .map(|s| {
+                    let (x, y) = s.position().unwrap_or((0, 0));
+                    let (w, h) = s.size().unwrap_or((0, 0));
+                    Mon { node_id: s.pipe_wire_node_id(), x, y, w, h }
+                })
+                .collect();
+            if mons.is_empty() {
+                return Err(anyhow!("portal oqim bermadi"));
+            }
+            // Chapdan o'ngga, so'ng tepadan pastga: tartib barqaror bo'lsin
+            mons.sort_by_key(|m| (m.x, m.y));
+            Ok::<_, anyhow::Error>((rd, sc, session, mons))
         }
         .await;
 
-        let (rd, sc, session, node) = match setup {
+        let (rd, sc, session, mons) = match setup {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("[portal] sessiyani ochib bo'lmadi: {e:#}");
-                let Cmd::OpenStream(reply) = first;
+                let Cmd::OpenStream(_, reply) = first;
                 let _ = reply.send(Err(e));
                 continue;
             }
         };
-        eprintln!("[portal] sessiya ochildi (PipeWire node {node})");
+        eprintln!("[portal] sessiya ochildi, monitorlar: {}", mons.len());
+        for (i, m) in mons.iter().enumerate() {
+            eprintln!("[portal]   monitor {i}: {}x{} @ ({}, {}), node {}", m.w, m.h, m.x, m.y, m.node_id);
+        }
 
         let mut next = Some(first);
         loop {
@@ -144,10 +170,19 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                     }
                 },
             };
-            let Cmd::OpenStream(reply) = cmd;
+            let Cmd::OpenStream(want, reply) = cmd;
+            let index = want.min(mons.len() - 1);
+            let m = mons[index];
             match sc.open_pipe_wire_remote(&session).await {
                 Ok(fd) => {
-                    let _ = reply.send(Ok(StreamInfo { fd, node_id: node }));
+                    let _ = reply.send(Ok(StreamInfo {
+                        fd,
+                        node_id: m.node_id,
+                        index,
+                        count: mons.len(),
+                        width: m.w,
+                        height: m.h,
+                    }));
                 }
                 Err(e) => {
                     eprintln!("[portal] sessiya yaroqsiz, qayta ochiladi: {e}");
