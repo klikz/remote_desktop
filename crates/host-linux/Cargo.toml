@@ -9,4 +9,11 @@ rdcore = { path = "../rdcore" }
 protocol = { path = "../protocol" }
 anyhow = "1"
 rpassword = "7"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
+
+# Faqat Linux'da: ekran olish (portal) va kodlash (GStreamer).
+# Ubuntu'da dev paketlar kerak, README ga qarang.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
+gstreamer = "0.23"
+gstreamer-app = "0.23"

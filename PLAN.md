@@ -103,12 +103,13 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Natijani hujjatlash. Agar dialogsiz ishlamasa: muqobil yo'l tanlanadi (masalan GNOME'ning o'z remote desktop xizmati asosida, yoki libei) va reja yangilanadi
 
 - [ ] ScreenCast portali orqali sessiya ochish (GNOME'da ruxsat dialogi)
-- [~] PipeWire oqimidan kadr olish: `portal-probe --features capture -- --capture N` yozildi (GStreamer `pipewiresrc`). Build va sinov kutilmoqda
+- [x] PipeWire oqimidan kadr olish: `portal-probe --features capture -- --capture N` ishladi (GStreamer `pipewiresrc`). Natija: 299 kadr/10 s, 28.9 FPS, ~3 Mbit/s, birinchi kadrgacha 338 ms. Eslatma: kodlangan o'lcham 3840x2160 (portal mantiqiy o'lchami 2880x1620), o'lchamni sozlash Bosqich 5 da
 - [ ] Portal restore token'ni saqlash (keyingi ishga tushishlarda dialogsiz)
 - [ ] Monitor ro'yxati va tanlash
-- [~] H.264 kodlash: `x264enc`/`openh264enc` (dasturiy) probe ichida, hali tekshirilmagan
-- [~] Apparat kodlash aniqlash (`vah264enc`/`nvh264enc`): probe mavjud kodlagichlarni ro'yxatga oladi va avtomatik tanlaydi, hali tekshirilmagan
-- [ ] Video oqimini Viewer'ga yuborish
+- [x] H.264 kodlash: Ubuntu'da `nvh264enc` (NVENC), `x264enc`, `openh264enc` mavjud va ishlaydi
+- [x] Apparat kodlash aniqlash: avtomatik tanlandi `nvh264enc` (NVENC). `vah264enc` bu mashinada yo'q
+- [~] Video oqimini Viewer'ga yuborish: protokolga `VideoRequest/VideoStarted/VideoFailed` va kadr sarlavhasi qo'shildi (14 ta test o'tdi). `host-linux` portal sessiyasi + GStreamer + QUIC video oqimi yozildi, `viewer-windows connect <IP> --video N [--out fayl.h264]` qabul qilib statistika chiqaradi. Build va tarmoq sinovi kutilmoqda
+  - Video oqimi hozircha bitta yo'nalishli QUIC oqimi (kadrlar ketma-ket). Yo'qotish ko'p bo'lsa kadr-kadr alohida oqim yoki datagramma ko'rib chiqiladi
 - [ ] Test: Ubuntu'dan lokal tarmoqda barqaror video, kechikish o'lchovi
 
 ### Bosqich 3. Windows Viewer: ko'rsatish
@@ -188,6 +189,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-29 | `ubuntu-host-setup.sh` qo'llangandan keyin (ekran o'chmaydi) portal-probe dialogsiz ochildi, kursor siljidi. Qoldi: qayta yuklash (auto-login) sinovi |
 | 2026-10-29 | Sinov B: qulf o'chirilgan bo'lsa ham ekran idle'da o'chgach yangi sessiya yaratilmaydi. Host ekrani o'chmasligi kerak. `scripts/ubuntu-host-setup.sh` qo'shildi |
 | 2026-10-29 | Sinov A: GNOME ekran qulflanganda ochiq sessiyani ham yopadi (`Invalid session`). Qarovsiz Host uchun qulf o'chirilgan bo'lishi shart |
+| 2026-10-29 | Kadr olish va H.264 kodlash Ubuntu'da muvaffaqiyatli sinaldi (NVENC, 28.9 FPS, 3 Mbit/s). Video yuborish yozildi (host-linux -> viewer-windows), tarmoq sinovi kutilmoqda |
 | 2026-10-29 | Bosqich 2 prototipi Ubuntu 26.04 (GNOME 50.1) da: restore token ilovani qayta ishga tushirishda dialogsiz ishladi. Qayta yuklash va ekran qulfi sinovlari kutilmoqda |
 | 2026-10-29 | **Bosqich 1 yopildi.** Haqiqiy tarmoqda Windows Viewer Ubuntu Host'ga ulandi, autentifikatsiya va ping ishladi (ping ~2 ms LAN'da) |
 | 2026-10-29 | `cargo test --workspace` Windows va Ubuntu'da muvaffaqiyatli o'tdi. Bosqich 1 avtomatik testlari tayyor. Qoldi: Windows Viewer -> Ubuntu Host qo'lda ulanish sinovi (haqiqiy tarmoq orqali) |

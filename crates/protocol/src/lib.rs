@@ -42,6 +42,64 @@ pub mod reason {
     }
 }
 
+/// `VideoFailed::reason` kodlari.
+pub mod video_reason {
+    pub const NO_CAPTURE: u8 = 1;
+    pub const NO_ENCODER: u8 = 2;
+    pub const BUSY: u8 = 3;
+    pub const BAD_REQUEST: u8 = 4;
+
+    pub fn describe(code: u8) -> &'static str {
+        match code {
+            NO_CAPTURE => "ekranni olib bo'lmadi (ekran qulflangan yoki portal ruxsat bermadi)",
+            NO_ENCODER => "H.264 kodlagich topilmadi",
+            BUSY => "video allaqachon yuborilmoqda",
+            BAD_REQUEST => "noto'g'ri so'rov",
+            _ => "noma'lum sabab",
+        }
+    }
+}
+
+/// Video kadr sarlavhasi uzunligi (baytlarda).
+pub const VIDEO_HEADER_LEN: usize = 13;
+/// Bitta kodlangan kadrning maksimal hajmi.
+pub const MAX_VIDEO_FRAME_LEN: usize = 16 << 20;
+
+/// Video oqimidagi har kadr oldidan keladi: `bayroqlar(1) + pts_us(8) + uzunlik(4)`, so'ng kadr baytlari.
+/// Bayroqlar: bit0 = kalit kadr (IDR).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoHeader {
+    pub keyframe: bool,
+    /// Taqdimot vaqti, mikrosekundlarda (Host soatiga nisbatan).
+    pub pts_us: u64,
+    /// Kadr baytlari soni.
+    pub len: u32,
+}
+
+impl VideoHeader {
+    pub fn encode(&self) -> [u8; VIDEO_HEADER_LEN] {
+        let mut out = [0u8; VIDEO_HEADER_LEN];
+        out[0] = u8::from(self.keyframe);
+        out[1..9].copy_from_slice(&self.pts_us.to_be_bytes());
+        out[9..13].copy_from_slice(&self.len.to_be_bytes());
+        out
+    }
+
+    pub fn decode(b: &[u8; VIDEO_HEADER_LEN]) -> Result<VideoHeader, DecodeError> {
+        let mut pts = [0u8; 8];
+        pts.copy_from_slice(&b[1..9]);
+        let len = u32::from_be_bytes([b[9], b[10], b[11], b[12]]);
+        if len as usize > MAX_VIDEO_FRAME_LEN {
+            return Err(DecodeError::BadFrameLength(len as usize));
+        }
+        Ok(VideoHeader {
+            keyframe: b[0] & 1 == 1,
+            pts_us: u64::from_be_bytes(pts),
+            len,
+        })
+    }
+}
+
 /// Ulanish ichidagi kanallar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Channel {
@@ -90,6 +148,12 @@ pub enum Message {
     Pong { id: u64, sent_ms: u64 },
     /// Ulanishni tartibli yopish.
     Bye { reason: u8 },
+    /// Viewer -> Host: videoni boshlashni so'raydi.
+    VideoRequest { fps: u16, kbps: u32 },
+    /// Host -> Viewer: video boshlandi. Kadrlar Host ochgan bir yo'nalishli oqimda keladi.
+    VideoStarted { codec: u8, fps: u16, kbps: u32 },
+    /// Host -> Viewer: videoni boshlab bo'lmadi (`video_reason`).
+    VideoFailed { reason: u8 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +190,9 @@ const TAG_CAPABILITIES: u8 = 5;
 const TAG_PING: u8 = 6;
 const TAG_PONG: u8 = 7;
 const TAG_BYE: u8 = 8;
+const TAG_VIDEO_REQUEST: u8 = 9;
+const TAG_VIDEO_STARTED: u8 = 10;
+const TAG_VIDEO_FAILED: u8 = 11;
 
 struct Reader<'a> {
     buf: &'a [u8],
@@ -243,6 +310,21 @@ impl Message {
                 out.push(TAG_BYE);
                 out.push(*reason);
             }
+            Message::VideoRequest { fps, kbps } => {
+                out.push(TAG_VIDEO_REQUEST);
+                out.extend_from_slice(&fps.to_be_bytes());
+                out.extend_from_slice(&kbps.to_be_bytes());
+            }
+            Message::VideoStarted { codec, fps, kbps } => {
+                out.push(TAG_VIDEO_STARTED);
+                out.push(*codec);
+                out.extend_from_slice(&fps.to_be_bytes());
+                out.extend_from_slice(&kbps.to_be_bytes());
+            }
+            Message::VideoFailed { reason } => {
+                out.push(TAG_VIDEO_FAILED);
+                out.push(*reason);
+            }
         }
         out
     }
@@ -293,6 +375,16 @@ impl Message {
                 sent_ms: r.u64()?,
             },
             TAG_BYE => Message::Bye { reason: r.u8()? },
+            TAG_VIDEO_REQUEST => Message::VideoRequest {
+                fps: r.u16()?,
+                kbps: r.u32()?,
+            },
+            TAG_VIDEO_STARTED => Message::VideoStarted {
+                codec: r.u8()?,
+                fps: r.u16()?,
+                kbps: r.u32()?,
+            },
+            TAG_VIDEO_FAILED => Message::VideoFailed { reason: r.u8()? },
             other => return Err(DecodeError::UnknownTag(other)),
         };
         r.finish()?;
@@ -358,6 +450,9 @@ mod tests {
             Message::Ping { id: u64::MAX, sent_ms: 123456789 },
             Message::Pong { id: 42, sent_ms: 0 },
             Message::Bye { reason: 0 },
+            Message::VideoRequest { fps: 30, kbps: 4000 },
+            Message::VideoStarted { codec: CODEC_H264, fps: 60, kbps: u32::MAX },
+            Message::VideoFailed { reason: video_reason::NO_CAPTURE },
         ]
     }
 
@@ -453,6 +548,30 @@ mod tests {
         match Message::decode(&m.encode()).unwrap() {
             Message::Capabilities(c) => assert_eq!(c.monitors.len(), 255),
             _ => panic!("kutilmagan xabar"),
+        }
+    }
+
+    #[test]
+    fn video_header_roundtrip() {
+        for (key, pts, len) in [(true, 0u64, 0u32), (false, u64::MAX, 1234), (true, 42, MAX_VIDEO_FRAME_LEN as u32)] {
+            let h = VideoHeader { keyframe: key, pts_us: pts, len };
+            assert_eq!(VideoHeader::decode(&h.encode()).unwrap(), h);
+        }
+    }
+
+    #[test]
+    fn video_header_rejects_huge_frames() {
+        let h = VideoHeader { keyframe: true, pts_us: 0, len: MAX_VIDEO_FRAME_LEN as u32 + 1 };
+        assert_eq!(
+            VideoHeader::decode(&h.encode()),
+            Err(DecodeError::BadFrameLength(MAX_VIDEO_FRAME_LEN + 1))
+        );
+    }
+
+    #[test]
+    fn video_reason_descriptions_exist() {
+        for code in 0..=5u8 {
+            assert!(!video_reason::describe(code).is_empty());
         }
     }
 

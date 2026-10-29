@@ -9,6 +9,7 @@
 //! - Noto'g'ri urinishlar IP bo'yicha cheklanadi (`ratelimit`).
 
 pub use protocol;
+pub use quinn;
 
 pub mod auth;
 pub mod cert;

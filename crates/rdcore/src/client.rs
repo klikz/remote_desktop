@@ -1,7 +1,9 @@
 //! Viewer tomoni: Host'ga ulanish, fingerprint tekshiruvi va autentifikatsiya.
 
 use anyhow::{anyhow, bail, Context, Result};
-use protocol::{reason, Capabilities, Message, PROTOCOL_VERSION};
+use protocol::{
+    reason, video_reason, Capabilities, Message, VideoHeader, PROTOCOL_VERSION, VIDEO_HEADER_LEN,
+};
 use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
@@ -19,6 +21,8 @@ use crate::{
 };
 
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
+/// Portal/kodlagich ishga tushishi uchun ko'proq vaqt beriladi.
+const VIDEO_START_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct ConnectOptions<'a> {
     pub addr: SocketAddr,
@@ -132,7 +136,66 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<Session> {
     })
 }
 
+/// Host yuborayotgan video oqimi.
+pub struct VideoStream {
+    recv: quinn::RecvStream,
+    pub codec: u8,
+    pub fps: u16,
+    pub kbps: u32,
+}
+
+pub struct VideoFrame {
+    pub keyframe: bool,
+    pub pts_us: u64,
+    /// H.264 (Annex B) baytlari.
+    pub data: Vec<u8>,
+}
+
+impl VideoStream {
+    /// Keyingi kadr. Host oqimni tugatsa `Ok(None)`.
+    pub async fn next_frame(&mut self) -> Result<Option<VideoFrame>> {
+        let mut hdr = [0u8; VIDEO_HEADER_LEN];
+        match self.recv.read_exact(&mut hdr).await {
+            Ok(()) => {}
+            Err(quinn::ReadExactError::FinishedEarly(0)) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        }
+        let h = VideoHeader::decode(&hdr)?;
+        let mut data = vec![0u8; h.len as usize];
+        self.recv
+            .read_exact(&mut data)
+            .await
+            .context("video kadri to'liq kelmadi")?;
+        Ok(Some(VideoFrame {
+            keyframe: h.keyframe,
+            pts_us: h.pts_us,
+            data,
+        }))
+    }
+}
+
 impl Session {
+    /// Hostdan videoni boshlashni so'raydi va kadrlar oqimini qaytaradi.
+    pub async fn request_video(&mut self, fps: u16, kbps: u32) -> Result<VideoStream> {
+        write_message(&mut self.send, &Message::VideoRequest { fps, kbps }).await?;
+        match timeout(VIDEO_START_TIMEOUT, read_message(&mut self.recv))
+            .await
+            .context("Host videoni boshlamadi (vaqt tugadi)")??
+        {
+            Message::VideoStarted { codec, fps, kbps } => {
+                let recv = timeout(VIDEO_START_TIMEOUT, self.conn.accept_uni())
+                    .await
+                    .context("video oqimi kelmadi (vaqt tugadi)")?
+                    .context("video oqimini qabul qilib bo'lmadi")?;
+                Ok(VideoStream { recv, codec, fps, kbps })
+            }
+            Message::VideoFailed { reason } => {
+                bail!("Host videoni boshlay olmadi: {}", video_reason::describe(reason))
+            }
+            other => bail!("kutilmagan javob: {other:?}"),
+        }
+    }
+
     /// Ping yuboradi va aylanish vaqtini (RTT) qaytaradi.
     pub async fn ping(&mut self) -> Result<Duration> {
         let id = self.next_ping;

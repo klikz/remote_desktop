@@ -42,3 +42,11 @@ sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev pkg-config
 cargo run -p portal-probe --features capture -- --capture 10 --out /tmp/test.h264
 ```
 Majburiy kodlagich: `RD_ENCODER=x264enc cargo run ...`
+
+## Video yuborish sinovi (Ubuntu Host -> Windows Viewer)
+
+GStreamer dev paketlari o'rnatilgan bo'lishi kerak (yuqorida). Endi `host-linux` ham GStreamer'ga bog'liq, shuning uchun Ubuntu'da `cargo test --workspace` uchun ham ular kerak.
+
+1. Ubuntu: `cargo run -p host-linux -- run` (birinchi marta GNOME ruxsat dialogi chiqadi)
+2. Windows: `cargo run -p viewer-windows -- connect <Ubuntu IP> --video 10 --out test.h264`
+3. Statistika chiqadi. `test.h264` ni VLC bilan oching.

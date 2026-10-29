@@ -3,7 +3,9 @@
 use anyhow::{bail, Context, Result};
 use protocol::{reason, Capabilities, Message, PROTOCOL_VERSION};
 use std::{
+    future::Future,
     net::{IpAddr, SocketAddr},
+    pin::Pin,
     sync::Arc,
     time::Duration,
 };
@@ -18,6 +20,21 @@ use crate::{
 };
 
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Autentifikatsiyadan o'tgan ulanish. Handler control oqimini (`send`/`recv`) va ulanishni o'zi boshqaradi.
+pub struct SessionIo {
+    pub conn: quinn::Connection,
+    pub send: quinn::SendStream,
+    pub recv: quinn::RecvStream,
+    pub peer: IpAddr,
+}
+
+pub type SessionFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+pub type Handler = Arc<dyn Fn(SessionIo) -> SessionFuture + Send + Sync>;
+
+pub fn default_handler() -> Handler {
+    Arc::new(|io| Box::pin(default_session(io)))
+}
 
 struct State {
     creds: Credentials,
@@ -58,6 +75,11 @@ impl Host {
 
     /// Ulanishlarni qabul qilish sikli (to'xtamaydi).
     pub async fn run(self) -> Result<()> {
+        self.run_with(default_handler()).await
+    }
+
+    /// Autentifikatsiyadan o'tgan har ulanish uchun `handler` chaqiriladi.
+    pub async fn run_with(self, handler: Handler) -> Result<()> {
         while let Some(incoming) = self.endpoint.accept().await {
             let ip = incoming.remote_address().ip();
             if self.state.limiter.is_blocked(ip) {
@@ -66,8 +88,9 @@ impl Host {
                 continue;
             }
             let state = self.state.clone();
+            let handler = handler.clone();
             tokio::spawn(async move {
-                if let Err(e) = serve(incoming, &state, ip).await {
+                if let Err(e) = serve(incoming, &state, ip, handler).await {
                     eprintln!("[host] {ip}: {e:#}");
                 }
             });
@@ -83,7 +106,7 @@ async fn graceful_reject(mut send: quinn::SendStream, conn: &quinn::Connection) 
     conn.close(1u32.into(), b"rejected");
 }
 
-async fn serve(incoming: quinn::Incoming, state: &State, ip: IpAddr) -> Result<()> {
+async fn serve(incoming: quinn::Incoming, state: &State, ip: IpAddr, handler: Handler) -> Result<()> {
     let connecting = incoming.accept().context("ulanishni qabul qilib bo'lmadi")?;
     let conn = timeout(STEP_TIMEOUT, connecting)
         .await
@@ -141,17 +164,23 @@ async fn serve(incoming: quinn::Incoming, state: &State, ip: IpAddr) -> Result<(
     write_message(&mut send, &Message::Capabilities(state.caps.clone())).await?;
     eprintln!("[host] {ip}: ulandi");
 
-    loop {
-        match read_message(&mut recv).await {
-            Ok(Message::Ping { id, sent_ms }) => {
-                write_message(&mut send, &Message::Pong { id, sent_ms }).await?;
-            }
-            Ok(Message::Bye { .. }) => break,
-            Ok(other) => bail!("kutilmagan xabar: {other:?}"),
-            Err(_) => break, // ulanish uzildi
-        }
-    }
-    conn.close(0u32.into(), b"bye");
+    handler(SessionIo { conn, send, recv, peer: ip }).await;
     eprintln!("[host] {ip}: uzildi");
     Ok(())
+}
+
+/// Standart sessiya: faqat ping/pong javob beradi (video yo'q).
+pub async fn default_session(mut io: SessionIo) {
+    loop {
+        match read_message(&mut io.recv).await {
+            Ok(Message::Ping { id, sent_ms }) => {
+                if write_message(&mut io.send, &Message::Pong { id, sent_ms }).await.is_err() {
+                    break;
+                }
+            }
+            Ok(Message::Bye { .. }) | Err(_) => break,
+            Ok(_) => {}
+        }
+    }
+    io.conn.close(0u32.into(), b"bye");
 }
