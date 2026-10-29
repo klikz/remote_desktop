@@ -98,7 +98,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [x] Birinchi marta ruxsat berish (foydalanuvchi oldida), restore token saqlash. Eslatma: `persist` faqat `select_devices`da beriladi, `select_sources`da `DoNot` bo'lishi shart (aks holda `Remote desktop sessions cannot persist` xatosi)
 - [~] Token bilan **dialogsiz** sessiya ochilishi: ilovani qayta ishga tushirganda tasdiqlandi (javob 0.05 s, ekran + klaviatura + sichqoncha). Sichqoncha kiritishi ham dialogsiz ishladi (kursor siljidi, foydalanuvchi tasdiqladi). Kompyuterni qayta yuklagandan keyin hali tekshirilmagan
   - Muhim: portal har sessiyada YANGI token qaytaradi, eskisi bilan almashtirib saqlash kerak (har start'dan keyin darhol, atomik yozish)
-- [~] Ekran qulflanganda, o'chganda va uyquga ketganda holatni tekshirish. **Topildi:** ekran qulflanganda YANGI sessiya yaratib bo'lmaydi (`sessiya yaratilmadi: Portal request didn't succeed: Other`). Sintetik kursor harakati o'chgan ekranni yoqadi. Hali tekshirilmagan: (a) qulfdan oldin ochilgan sessiya qulf/ochilishda ishlaydimi (`--watch`), (b) qulf o'chirilgan, lekin ekran o'chgan (blank) holatda sessiya ochiladimi
+- [~] Ekran qulflanganda, o'chganda va uyquga ketganda holatni tekshirish. **Topildi:** ekran qulflanganda YANGI sessiya yaratib bo'lmaydi (`sessiya yaratilmadi: Portal request didn't succeed: Other`). Sintetik kursor harakati o'chgan ekranni yoqadi. **Sinov A natijasi:** qulfdan oldin ochilgan sessiya ham qulflanganda o'ladi (`Invalid session`, ~1 soniyada), tiklanmaydi. Xulosa: Host ekrani hech qachon qulflanmasligi kerak; sessiya uzilsa Host qayta ochishga urinish sikli kerak. **Sinov B natijasi:** qulf o'chirilgan bo'lsa ham, idle (ekran o'chishi) paytida yangi sessiya yaratib bo'lmaydi (`Portal request didn't succeed: Other`). Xulosa: qarovsiz Host'da ekran o'chmasligi (`idle-delay 0`), qulf va uyqu ham bo'lmasligi kerak. Skript: `scripts/ubuntu-host-setup.sh` (--apply, --revert, --status). Virtual/o'chiq monitor holati Host kompyuteri uchun alohida masala (HDMI dummy plug yoki monitorni yoqiq qoldirish)
 - [ ] Natijani hujjatlash. Agar dialogsiz ishlamasa: muqobil yo'l tanlanadi (masalan GNOME'ning o'z remote desktop xizmati asosida, yoki libei) va reja yangilanadi
 
 - [ ] ScreenCast portali orqali sessiya ochish (GNOME'da ruxsat dialogi)
@@ -139,7 +139,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Host routerida UDP port forwarding (Linux Host uchun yo'riqnoma)
 - [ ] Ubuntu firewall (ufw) qoidasi
 - [x] IP statik (Q5), DDNS kerak emas
-- [ ] Ubuntu qarovsiz ishlash sozlamalari: avtomatik kirish (auto-login), ekran qulfini o'chirish, ekran o'chishi va uyquni o'chirish
+- [~] Ubuntu qarovsiz ishlash sozlamalari: `scripts/ubuntu-host-setup.sh` yozildi (qulf, ekran o'chishi, uyqu). Avtomatik kirish (auto-login) qo'lda: Settings > Users > Automatic Login
 - [ ] Dastur avtostarti (systemd user service), xato bo'lsa qayta ishga tushirish
 - [ ] Parol kuchliligi talabi, parol xesh ko'rinishida saqlanadi
 - [ ] Ixtiyoriy IP ruxsat ro'yxati (allowlist)
@@ -184,6 +184,8 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 |---|---|
 | 2026-10-29 | Reja tuzildi, qarorlar qabul qilindi |
 | 2026-10-29 | Bosqich 0 deyarli tayyor: workspace, git, build skriptlari yaratildi. Bo'sh workspace Linux'da `cargo test` va `cargo build --release` bilan tekshirildi. Qolgan: foydalanuvchi Rust'ni o'rnatadi |
+| 2026-10-29 | Sinov B: qulf o'chirilgan bo'lsa ham ekran idle'da o'chgach yangi sessiya yaratilmaydi. Host ekrani o'chmasligi kerak. `scripts/ubuntu-host-setup.sh` qo'shildi |
+| 2026-10-29 | Sinov A: GNOME ekran qulflanganda ochiq sessiyani ham yopadi (`Invalid session`). Qarovsiz Host uchun qulf o'chirilgan bo'lishi shart |
 | 2026-10-29 | Bosqich 2 prototipi Ubuntu 26.04 (GNOME 50.1) da: restore token ilovani qayta ishga tushirishda dialogsiz ishladi. Qayta yuklash va ekran qulfi sinovlari kutilmoqda |
 | 2026-10-29 | **Bosqich 1 yopildi.** Haqiqiy tarmoqda Windows Viewer Ubuntu Host'ga ulandi, autentifikatsiya va ping ishladi (ping ~2 ms LAN'da) |
 | 2026-10-29 | `cargo test --workspace` Windows va Ubuntu'da muvaffaqiyatli o'tdi. Bosqich 1 avtomatik testlari tayyor. Qoldi: Windows Viewer -> Ubuntu Host qo'lda ulanish sinovi (haqiqiy tarmoq orqali) |
