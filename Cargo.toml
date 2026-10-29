@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/protocol",
+    "crates/rdcore",
+    "crates/host-linux",
+    "crates/viewer-windows",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Kriptografiya tez ishlashi uchun (argon2) dependency'lar dev rejimida ham optimallashtiriladi
+[profile.dev.package."*"]
+opt-level = 2

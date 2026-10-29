@@ -1,0 +1,12 @@
+[package]
+name = "viewer-windows"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+rdcore = { path = "../rdcore" }
+protocol = { path = "../protocol" }
+anyhow = "1"
+rpassword = "7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"] }
