@@ -6,7 +6,6 @@
 use anyhow::{Context, Result};
 use minifb::{Key, ScaleMode, Window, WindowOptions};
 use openh264::decoder::Decoder;
-use openh264::formats::YUVSource;
 use rdcore::client::Session;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -48,7 +47,7 @@ pub async fn run(session: &mut Session, fps: u16, kbps: u32, max_height: u16) ->
         while let Ok((_key, data)) = rx.recv() {
             match decoder.decode(&data) {
                 Ok(Some(yuv)) => {
-                    let (w, h) = yuv.dimension_rgb();
+                    let (w, h) = yuv.dimensions();
                     rgb.resize(w * h * 3, 0);
                     yuv.write_rgb8(&mut rgb);
                     let pixels: Vec<u32> = rgb
