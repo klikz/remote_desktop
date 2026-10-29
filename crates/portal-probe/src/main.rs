@@ -96,7 +96,8 @@ mod imp {
                 SourceType::Monitor.into(),
                 false,
                 None,
-                PersistMode::ExplicitlyRevoked,
+                // RemoteDesktop sessiyasida persist faqat select_devices'da beriladi.
+                PersistMode::DoNot,
             )
             .await
             .context("select_sources xatosi")?;
