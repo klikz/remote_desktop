@@ -66,7 +66,7 @@ fn encoder_base(factory: &str, kbps: u32, gop: u32) -> String {
     }
 }
 
-pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32, max_height: u32) -> Result<Capture, CaptureError> {
+pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32, max_height: u32, src_size: (i32, i32)) -> Result<Capture, CaptureError> {
     gst::init()
         .context("GStreamer ishga tushmadi")
         .map_err(|e| fail(video_reason::NO_CAPTURE, e))?;
@@ -94,7 +94,14 @@ pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32, max_height: u32) ->
     // Kalit kadr har 1 soniyada: Viewer ulanganda tez boshlanishi uchun.
     let gop = fps.max(1);
     let height_caps = if max_height > 0 {
-        format!(",height={max_height}")
+        // Nisbatni saqlash uchun kenglikni o'zimiz hisoblaymiz (juft son)
+        let (sw, sh) = src_size;
+        if sw > 0 && sh > 0 {
+            let w = ((max_height as u64 * sw as u64 / sh as u64) as u32 + 1) & !1;
+            format!(",width={w},height={}", max_height & !1)
+        } else {
+            format!(",height={},pixel-aspect-ratio=1/1", max_height & !1)
+        }
     } else {
         String::new()
     };

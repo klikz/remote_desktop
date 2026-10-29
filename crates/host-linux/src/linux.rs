@@ -142,7 +142,7 @@ async fn start_video(
         video_reason::NO_CAPTURE
     })?;
     let (index, count, width, height) = (info.index, info.count, info.width, info.height);
-    let cap = capture::start(info.fd, info.node_id, fps as u32, kbps, max_height as u32).map_err(|e| {
+    let cap = capture::start(info.fd, info.node_id, fps as u32, kbps, max_height as u32, (width, height)).map_err(|e| {
         eprintln!("[host] kodlashni boshlab bo'lmadi: {:#}", e.error);
         e.reason
     })?;
