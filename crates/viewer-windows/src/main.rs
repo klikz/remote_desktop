@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match (args.first().map(String::as_str), args.get(1)) {
         (Some("connect"), Some(target)) => {
-            let mut opts = Options { video_secs: 0, fps: 30, kbps: 4000, max_height: 1080, view: false, out: None };
+            let mut opts = Options { video_secs: 0, fps: 30, kbps: 10000, max_height: 1080, view: false, out: None };
             let mut it = args[2..].iter();
             while let Some(a) = it.next() {
                 match a.as_str() {

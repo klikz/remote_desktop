@@ -49,6 +49,13 @@ fn fail(reason: u8, error: anyhow::Error) -> CaptureError {
 }
 
 fn encoder_desc(factory: &str, kbps: u32, gop: u32) -> String {
+    // Sozlash uchun: RD_ENC_OPTS="preset=p5 tune=low-latency" kabi qo'shimcha xususiyatlar
+    let extra = std::env::var("RD_ENC_OPTS").unwrap_or_default();
+    let base = encoder_base(factory, kbps, gop);
+    if extra.trim().is_empty() { base } else { format!("{base} {extra}") }
+}
+
+fn encoder_base(factory: &str, kbps: u32, gop: u32) -> String {
     match factory {
         "vah264enc" => format!("vah264enc bitrate={kbps} key-int-max={gop}"),
         "nvh264enc" => format!("nvh264enc bitrate={kbps} gop-size={gop}"),

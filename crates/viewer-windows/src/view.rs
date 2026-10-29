@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use minifb::{Key, ScaleMode, Window, WindowOptions};
 use openh264::decoder::Decoder;
+use openh264::formats::YUVSource;
 use rdcore::client::Session;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -123,7 +124,7 @@ fn window_loop(slot: Slot, stop: Arc<AtomicBool>) -> Result<()> {
         }
         if let Some(p) = &shown {
             if window.is_none() || size != (p.w, p.h) {
-                let scale = (1600.0 / p.w as f64).min(900.0 / p.h as f64).min(1.0);
+                let scale = (1920.0 / p.w as f64).min(1000.0 / p.h as f64).min(1.0);
                 let (ww, wh) = (((p.w as f64) * scale) as usize, ((p.h as f64) * scale) as usize);
                 let mut w = Window::new(
                     "Remote Desktop",
