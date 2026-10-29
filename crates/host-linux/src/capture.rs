@@ -59,12 +59,12 @@ fn encoder_desc(factory: &str, kbps: u32, gop: u32) -> String {
     }
 }
 
-pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32) -> Result<Capture, CaptureError> {
+pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32, max_height: u32) -> Result<Capture, CaptureError> {
     gst::init()
         .context("GStreamer ishga tushmadi")
         .map_err(|e| fail(video_reason::NO_CAPTURE, e))?;
 
-    for need in ["pipewiresrc", "videoconvert", "videorate"] {
+    for need in ["pipewiresrc", "videoconvert", "videoscale", "videorate"] {
         if gst::ElementFactory::find(need).is_none() {
             return Err(fail(
                 video_reason::NO_CAPTURE,
@@ -86,13 +86,19 @@ pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32) -> Result<Capture, 
 
     // Kalit kadr har 1 soniyada: Viewer ulanganda tez boshlanishi uchun.
     let gop = fps.max(1);
+    let height_caps = if max_height > 0 {
+        format!(",height={max_height}")
+    } else {
+        String::new()
+    };
     let desc = format!(
-        "pipewiresrc fd={} path={} do-timestamp=true ! videoconvert ! videorate ! \
-         video/x-raw,framerate={}/1 ! {} ! video/x-h264,stream-format=byte-stream,alignment=au ! \
+        "pipewiresrc fd={} path={} do-timestamp=true ! videoconvert ! videoscale ! videorate ! \
+         video/x-raw,framerate={}/1{} ! {} ! video/x-h264,stream-format=byte-stream,alignment=au ! \
          appsink name=sink sync=false max-buffers=4 drop=true",
         fd.as_raw_fd(),
         node_id,
         fps,
+        height_caps,
         encoder_desc(encoder, kbps, gop)
     );
 

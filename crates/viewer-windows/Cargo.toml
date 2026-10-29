@@ -10,3 +10,5 @@ protocol = { path = "../protocol" }
 anyhow = "1"
 rpassword = "7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"] }
+openh264 = "0.6"
+minifb = "0.27"

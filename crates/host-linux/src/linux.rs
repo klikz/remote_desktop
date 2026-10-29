@@ -101,11 +101,11 @@ async fn session(mut io: SessionIo, portal: PortalHandle) {
                     break;
                 }
             }
-            Ok(Message::VideoRequest { fps, kbps }) => {
+            Ok(Message::VideoRequest { fps, kbps, max_height }) => {
                 let reply = if video.as_ref().map_or(false, |h| !h.is_finished()) {
                     Message::VideoFailed { reason: video_reason::BUSY }
                 } else {
-                    match start_video(&io, &portal, fps, kbps).await {
+                    match start_video(&io, &portal, fps, kbps, max_height).await {
                         Ok((handle, fps, kbps)) => {
                             video = Some(handle);
                             Message::VideoStarted { codec: CODEC_H264, fps, kbps }
@@ -132,6 +132,7 @@ async fn start_video(
     portal: &PortalHandle,
     fps: u16,
     kbps: u32,
+    max_height: u16,
 ) -> Result<(JoinHandle<()>, u16, u32), u8> {
     let fps = fps.clamp(5, 60);
     let kbps = kbps.clamp(500, 50_000);
@@ -139,11 +140,15 @@ async fn start_video(
         eprintln!("[host] ekranni olib bo'lmadi: {e:#}");
         video_reason::NO_CAPTURE
     })?;
-    let cap = capture::start(info.fd, info.node_id, fps as u32, kbps).map_err(|e| {
+    let cap = capture::start(info.fd, info.node_id, fps as u32, kbps, max_height as u32).map_err(|e| {
         eprintln!("[host] kodlashni boshlab bo'lmadi: {:#}", e.error);
         e.reason
     })?;
-    println!("[host] video boshlandi: {fps} FPS, {kbps} kbit/s, kodlagich {}", cap.encoder);
+    println!(
+        "[host] video boshlandi: {fps} FPS, {kbps} kbit/s, balandlik {}, kodlagich {}",
+        if max_height == 0 { "asl".to_string() } else { max_height.to_string() },
+        cap.encoder
+    );
     let conn = io.conn.clone();
     Ok((tokio::spawn(video_sender(conn, cap)), fps, kbps))
 }

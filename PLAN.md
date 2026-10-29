@@ -97,7 +97,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 **Go/no-go tekshiruv (birinchi qilinadi).** Q6 sababli qarovsiz ishlash Ubuntu 26.04'da amalda ishlashi kerak. Kichik prototip bilan tekshiramiz, shundan keyingina qolgan ishga o'tamiz.
 - [~] Prototip: `crates/portal-probe` (ashpd 0.11) yozildi: ScreenCast + RemoteDesktop bitta sessiyada, restore token saqlash, kursorni surish sinovi. Ubuntu: GNOME Shell 50.1, xdg-desktop-portal 1.21.1, portal-gnome 50.0, PipeWire 1.6.2, libei 1.5. Ubuntu'da build va ishga tushirildi: ScreenCast + RemoteDesktop bitta sessiyada ochiladi (monitor oqimi 2880x1620, node 78)
 - [x] Birinchi marta ruxsat berish (foydalanuvchi oldida), restore token saqlash. Eslatma: `persist` faqat `select_devices`da beriladi, `select_sources`da `DoNot` bo'lishi shart (aks holda `Remote desktop sessions cannot persist` xatosi)
-- [~] Token bilan **dialogsiz** sessiya ochilishi: ilovani qayta ishga tushirganda tasdiqlandi (javob 0.05 s, ekran + klaviatura + sichqoncha). Sichqoncha kiritishi ham dialogsiz ishladi (kursor siljidi, foydalanuvchi tasdiqladi). Kompyuterni qayta yuklagandan keyin hali tekshirilmagan
+- [x] Token bilan **dialogsiz** sessiya ochilishi (qayta yuklashdan keyin ham tasdiqlandi, javob 0.01 s): ilovani qayta ishga tushirganda tasdiqlandi (javob 0.05 s, ekran + klaviatura + sichqoncha). Sichqoncha kiritishi ham dialogsiz ishladi (kursor siljidi, foydalanuvchi tasdiqladi). Kompyuterni qayta yuklagandan keyin ham dialogsiz ishladi
   - Muhim: portal har sessiyada YANGI token qaytaradi, eskisi bilan almashtirib saqlash kerak (har start'dan keyin darhol, atomik yozish)
 - [~] Ekran qulflanganda, o'chganda va uyquga ketganda holatni tekshirish. **Topildi:** ekran qulflanganda YANGI sessiya yaratib bo'lmaydi (`sessiya yaratilmadi: Portal request didn't succeed: Other`). Sintetik kursor harakati o'chgan ekranni yoqadi. **Sinov A natijasi:** qulfdan oldin ochilgan sessiya ham qulflanganda o'ladi (`Invalid session`, ~1 soniyada), tiklanmaydi. Xulosa: Host ekrani hech qachon qulflanmasligi kerak; sessiya uzilsa Host qayta ochishga urinish sikli kerak. **Sinov B natijasi:** qulf o'chirilgan bo'lsa ham, idle (ekran o'chishi) paytida yangi sessiya yaratib bo'lmaydi (`Portal request didn't succeed: Other`). Xulosa: qarovsiz Host'da ekran o'chmasligi (`idle-delay 0`), qulf va uyqu ham bo'lmasligi kerak. Skript: `scripts/ubuntu-host-setup.sh` (--apply, --revert, --status). Virtual/o'chiq monitor holati Host kompyuteri uchun alohida masala (HDMI dummy plug yoki monitorni yoqiq qoldirish)
 - [ ] Natijani hujjatlash. Agar dialogsiz ishlamasa: muqobil yo'l tanlanadi (masalan GNOME'ning o'z remote desktop xizmati asosida, yoki libei) va reja yangilanadi
@@ -108,12 +108,12 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Monitor ro'yxati va tanlash
 - [x] H.264 kodlash: Ubuntu'da `nvh264enc` (NVENC), `x264enc`, `openh264enc` mavjud va ishlaydi
 - [x] Apparat kodlash aniqlash: avtomatik tanlandi `nvh264enc` (NVENC). `vah264enc` bu mashinada yo'q
-- [~] Video oqimini Viewer'ga yuborish: protokolga `VideoRequest/VideoStarted/VideoFailed` va kadr sarlavhasi qo'shildi (14 ta test o'tdi). `host-linux` portal sessiyasi + GStreamer + QUIC video oqimi yozildi, `viewer-windows connect <IP> --video N [--out fayl.h264]` qabul qilib statistika chiqaradi. Build va tarmoq sinovi kutilmoqda
+- [x] Video oqimini Viewer'ga yuborish: Ubuntu Host -> Windows Viewer tarmoq sinovi o'tdi (303 kadr/10 s, 30.3 FPS, 3325 kbit/s, birinchi kadr 262 ms, eng katta uzilish 33 ms). `test.h264` ni VLC'da ochib tekshirish kutilmoqda
   - Video oqimi hozircha bitta yo'nalishli QUIC oqimi (kadrlar ketma-ket). Yo'qotish ko'p bo'lsa kadr-kadr alohida oqim yoki datagramma ko'rib chiqiladi
 - [ ] Test: Ubuntu'dan lokal tarmoqda barqaror video, kechikish o'lchovi
 
 ### Bosqich 3. Windows Viewer: ko'rsatish
-- [ ] Video oqimini qabul qilish va dekodlash (apparat dekodlash: D3D11/DXVA)
+- [~] Video oqimini qabul qilish va dekodlash: `viewer-windows connect <IP> --view` yozildi (openh264 dasturiy dekoder + minifb oyna, Esc - chiqish). Host `--height` bilan kichraytirib yuboradi (VideoRequest.max_height). Build va sinov kutilmoqda; apparat dekodlash (D3D11) keyinroq
 - [ ] Viewer oynasida ko'rsatish (to'liq ekran, oynaga moslash, masshtab)
 - [ ] Ulanish holati va xatolarni ko'rsatish
 - [ ] Test: Windows oynasida Ubuntu ekrani ko'rinadi
@@ -189,6 +189,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-29 | `ubuntu-host-setup.sh` qo'llangandan keyin (ekran o'chmaydi) portal-probe dialogsiz ochildi, kursor siljidi. Qoldi: qayta yuklash (auto-login) sinovi |
 | 2026-10-29 | Sinov B: qulf o'chirilgan bo'lsa ham ekran idle'da o'chgach yangi sessiya yaratilmaydi. Host ekrani o'chmasligi kerak. `scripts/ubuntu-host-setup.sh` qo'shildi |
 | 2026-10-29 | Sinov A: GNOME ekran qulflanganda ochiq sessiyani ham yopadi (`Invalid session`). Qarovsiz Host uchun qulf o'chirilgan bo'lishi shart |
+| 2026-10-29 | **Go/no-go: GO.** Qayta yuklashdan keyin portal token dialogsiz ishladi. Shartlar: auto-login, ekran qulfi/o'chishi/uyqu o'chirilgan (`ubuntu-host-setup.sh`) |
 | 2026-10-29 | Kadr olish va H.264 kodlash Ubuntu'da muvaffaqiyatli sinaldi (NVENC, 28.9 FPS, 3 Mbit/s). Video yuborish yozildi (host-linux -> viewer-windows), tarmoq sinovi kutilmoqda |
 | 2026-10-29 | Bosqich 2 prototipi Ubuntu 26.04 (GNOME 50.1) da: restore token ilovani qayta ishga tushirishda dialogsiz ishladi. Qayta yuklash va ekran qulfi sinovlari kutilmoqda |
 | 2026-10-29 | **Bosqich 1 yopildi.** Haqiqiy tarmoqda Windows Viewer Ubuntu Host'ga ulandi, autentifikatsiya va ping ishladi (ping ~2 ms LAN'da) |
@@ -198,3 +199,4 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-29 | **To'siq (hal qilindi lokal build bilan):** Claude ishlaydigan muhitdan crates.io ga ulanib bo'lmaydi (tarmoq ruxsati yo'q), shuning uchun tashqi kutubxonali kod (QUIC va boshqalar) Claude tomonda kompilyatsiya qilinmaydi. Yechim kutilmoqda |
 | 2026-10-29 | Q4-Q7 javoblari qo'shildi: Ubuntu 26.04.1, statik IP, qarovsiz ishlash talabi. Bosqich 2 boshiga go/no-go tekshiruv qo'shildi |
 | 2026-10-29 | Q1-Q3 javoblari qo'shildi: Linux (Ubuntu GNOME Wayland) Host, Windows Viewer, oq IP bor. Bosqichlar shunga qayta tartiblandi |
+| 2026-10-29 | Video yuborish tarmoq orqali muvaffaqiyatli sinaldi (30.3 FPS, 3.3 Mbit/s, 262 ms). Bosqich 3 boshlandi: VideoRequest ga `max_height` qo'shildi, Viewer'ga `--view` (dekodlash + oyna) yozildi, build kutilmoqda |
