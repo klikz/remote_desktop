@@ -26,6 +26,7 @@ Asosiy funksiyalar:
 | Til | Rust (yagona binary, tashqi runtime kerak emas) |
 | Transport | QUIC (`quinn`), TLS 1.3 shifrlash. Zaxira: TCP + TLS |
 | Video | H.264 (apparat kodlash bo'lsa ishlatiladi, aks holda dasturiy) |
+| Linux ekran olish va kodlash | GStreamer: `pipewiresrc` + H.264 kodlagich (mavjudidan avtomatik: `vah264enc` > `nvh264enc` > `x264enc` > `openh264enc`). Apparat kodlash keyin osongina ulanadi. Kamchilik: Host'da GStreamer paketlari kerak (Ubuntu Desktop'da asosiylari bor, `x264enc` uchun `plugins-ugly`) |
 | UI | Tauri (Rust + web UI) |
 | Autentifikatsiya | Self-signed sertifikat + fingerprint tasdig'i + parol/PIN |
 | Qo'shimcha o'rnatish | Talab qilinmaydi. Dastur o'zi yetarli bo'lishi shart |
@@ -102,11 +103,11 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Natijani hujjatlash. Agar dialogsiz ishlamasa: muqobil yo'l tanlanadi (masalan GNOME'ning o'z remote desktop xizmati asosida, yoki libei) va reja yangilanadi
 
 - [ ] ScreenCast portali orqali sessiya ochish (GNOME'da ruxsat dialogi)
-- [ ] PipeWire oqimidan kadr olish
+- [~] PipeWire oqimidan kadr olish: `portal-probe --features capture -- --capture N` yozildi (GStreamer `pipewiresrc`). Build va sinov kutilmoqda
 - [ ] Portal restore token'ni saqlash (keyingi ishga tushishlarda dialogsiz)
 - [ ] Monitor ro'yxati va tanlash
-- [ ] H.264 kodlash (dasturiy zaxira)
-- [ ] Apparat kodlash aniqlash (VAAPI/NVENC, mavjud bo'lsa)
+- [~] H.264 kodlash: `x264enc`/`openh264enc` (dasturiy) probe ichida, hali tekshirilmagan
+- [~] Apparat kodlash aniqlash (`vah264enc`/`nvh264enc`): probe mavjud kodlagichlarni ro'yxatga oladi va avtomatik tanlaydi, hali tekshirilmagan
 - [ ] Video oqimini Viewer'ga yuborish
 - [ ] Test: Ubuntu'dan lokal tarmoqda barqaror video, kechikish o'lchovi
 
@@ -184,6 +185,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 |---|---|
 | 2026-10-29 | Reja tuzildi, qarorlar qabul qilindi |
 | 2026-10-29 | Bosqich 0 deyarli tayyor: workspace, git, build skriptlari yaratildi. Bo'sh workspace Linux'da `cargo test` va `cargo build --release` bilan tekshirildi. Qolgan: foydalanuvchi Rust'ni o'rnatadi |
+| 2026-10-29 | `ubuntu-host-setup.sh` qo'llangandan keyin (ekran o'chmaydi) portal-probe dialogsiz ochildi, kursor siljidi. Qoldi: qayta yuklash (auto-login) sinovi |
 | 2026-10-29 | Sinov B: qulf o'chirilgan bo'lsa ham ekran idle'da o'chgach yangi sessiya yaratilmaydi. Host ekrani o'chmasligi kerak. `scripts/ubuntu-host-setup.sh` qo'shildi |
 | 2026-10-29 | Sinov A: GNOME ekran qulflanganda ochiq sessiyani ham yopadi (`Invalid session`). Qarovsiz Host uchun qulf o'chirilgan bo'lishi shart |
 | 2026-10-29 | Bosqich 2 prototipi Ubuntu 26.04 (GNOME 50.1) da: restore token ilovani qayta ishga tushirishda dialogsiz ishladi. Qayta yuklash va ekran qulfi sinovlari kutilmoqda |

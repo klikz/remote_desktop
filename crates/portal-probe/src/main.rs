@@ -3,6 +3,10 @@
 //!
 //! Foydalanish:
 //!   portal-probe [--delay SEKUND] [--watch SEKUND] [--no-input] [--reset]
+//!                [--capture SEKUND [--fps N] [--kbps N] [--out FAYL.h264]]
+//!
+//!   --capture: PipeWire oqimidan kadr olib H.264 ga kodlaydi (faqat `--features capture` bilan
+//!   build qilinganda). Statistika chiqaradi, --out berilsa faylga yozadi.
 //!
 //!   --watch N: sessiyani N soniya ochiq ushlab, har 2 soniyada kursorni 1 px surib
 //!   (ok/xato chiqaradi). Shu vaqt ichida ekranni qulflab/ochib sinang.
@@ -14,6 +18,9 @@
 fn main() {
     eprintln!("portal-probe faqat Linux uchun.");
 }
+
+#[cfg(all(target_os = "linux", feature = "capture"))]
+mod capture;
 
 #[cfg(target_os = "linux")]
 #[tokio::main]
@@ -45,6 +52,10 @@ mod imp {
     pub async fn run(args: Vec<String>) -> Result<()> {
         let mut delay: u64 = 0;
         let mut watch: u64 = 0;
+        let mut capture_secs: u64 = 0;
+        let mut fps: u32 = 30;
+        let mut kbps: u32 = 4000;
+        let mut out: Option<PathBuf> = None;
         let mut no_input = false;
         let mut reset = false;
         let mut it = args.iter();
@@ -52,6 +63,10 @@ mod imp {
             match a.as_str() {
                 "--delay" => delay = it.next().context("--delay uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
                 "--watch" => watch = it.next().context("--watch uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
+                "--capture" => capture_secs = it.next().context("--capture uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
+                "--fps" => fps = it.next().context("--fps uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
+                "--kbps" => kbps = it.next().context("--kbps uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
+                "--out" => out = Some(PathBuf::from(it.next().context("--out uchun yo'l kerak")?)),
                 "--no-input" => no_input = true,
                 "--reset" => reset = true,
                 other => anyhow::bail!("noma'lum argument: {other}"),
@@ -152,6 +167,34 @@ mod imp {
             remote_desktop.notify_pointer_motion(&session, 30.0, 0.0).await.context("notify_pointer_motion xatosi")?;
             tokio::time::sleep(Duration::from_millis(600)).await;
             remote_desktop.notify_pointer_motion(&session, -30.0, 0.0).await.context("notify_pointer_motion xatosi")?;
+        }
+
+        #[cfg(feature = "capture")]
+        {
+            if capture_secs > 0 {
+                let node = started
+                    .streams()
+                    .unwrap_or_default()
+                    .first()
+                    .map(|s| s.pipe_wire_node_id())
+                    .context("portal oqim bermadi")?;
+                let fd = screencast
+                    .open_pipe_wire_remote(&session)
+                    .await
+                    .context("PipeWire ulanishini (fd) olib bo'lmadi")?;
+                println!("PipeWire node {node}, kodlash: {fps} FPS, {kbps} kbit/s");
+                let out = out.clone();
+                tokio::task::spawn_blocking(move || crate::capture::run(fd, node, capture_secs, fps, kbps, out))
+                    .await
+                    .context("capture oqimi to'xtadi")??;
+            }
+        }
+        #[cfg(not(feature = "capture"))]
+        {
+            let _ = (fps, kbps, &out);
+            if capture_secs > 0 {
+                println!("--capture uchun `--features capture` bilan build qiling (README ga qarang).");
+            }
         }
 
         if watch > 0 {
