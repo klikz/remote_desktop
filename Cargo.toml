@@ -5,6 +5,7 @@ members = [
     "crates/rdcore",
     "crates/host-linux",
     "crates/viewer-windows",
+    "crates/portal-probe",
 ]
 
 [workspace.package]

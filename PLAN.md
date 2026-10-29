@@ -81,19 +81,20 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 ### Bosqich 1. Poydevor: protokol va ulanish
 - [x] Protokol xabarlari: hello, auth, capabilities, ping/pong, bye (`crates/protocol`, 11 ta test o'tdi). Input va settings xabarlari Bosqich 3 va 5 da qo'shiladi
 - [x] Binary serializatsiya: qo'lda yozilgan, tashqi kutubxonasiz, frame (u32 uzunlik) + xabar turi; `PROTOCOL_VERSION = 1`
-- [~] QUIC server (Host) va klient (Viewer): `rdcore::server`, `rdcore::client` (quinn 0.11, TLS 1.3). Hozircha faqat control oqimi
-- [~] Self-signed sertifikat yaratish va saqlash (Host): `rdcore::cert` (rcgen)
-- [~] Fingerprint ko'rsatish va "known hosts" saqlash (Viewer). `known_hosts` mantiqi tekshirilgan (3 test), ulanish bilan bog'lanishi `[~]`. Fingerprint o'zgarsa ulanish rad etiladi
-- [~] Parol autentifikatsiyasi: parol yuborilmaydi, `HMAC(argon2id(parol), nonce || fingerprint)` isboti yuboriladi (fingerprint bog'langani MITM'dan himoya qiladi). `rdcore::auth`
-- [~] Noto'g'ri urinishlarni cheklash: IP bo'yicha 10 daqiqada 5 xato -> 15 daqiqa blok. Mantiq tekshirilgan (5 test), Host'ga ulanishi `[~]`
-- [~] Capability: Host kodek, maksimal FPS va monitorlar ro'yxatini e'lon qiladi (monitorlar hozircha bo'sh). Viewer tanlovi Bosqich 5 da (Settings xabari)
-- [ ] Test (foydalanuvchi): 1) `cargo test --workspace` ikkala kompyuterda; 2) Ubuntu'da `host-linux run`, Windows'dan `viewer-windows connect <IP>`, ping ishlaydi; 3) noto'g'ri parol rad etiladi
+- [x] QUIC server (Host) va klient (Viewer): `rdcore::server`, `rdcore::client` (quinn 0.11, TLS 1.3). Hozircha faqat control oqimi
+- [x] Self-signed sertifikat yaratish va saqlash (Host): `rdcore::cert` (rcgen)
+- [x] Fingerprint ko'rsatish va "known hosts" saqlash (Viewer). `known_hosts` mantiqi tekshirilgan (3 test), ulanish bilan bog'lanishi loopback testlarda tasdiqlandi. Fingerprint o'zgarsa ulanish rad etiladi
+- [x] Parol autentifikatsiyasi: parol yuborilmaydi, `HMAC(argon2id(parol), nonce || fingerprint)` isboti yuboriladi (fingerprint bog'langani MITM'dan himoya qiladi). `rdcore::auth`
+- [x] Noto'g'ri urinishlarni cheklash: IP bo'yicha 10 daqiqada 5 xato -> 15 daqiqa blok. Mantiq tekshirilgan (5 test), Host'ga ulanishi loopback testda tasdiqlandi
+- [x] Capability: Host kodek, maksimal FPS va monitorlar ro'yxatini e'lon qiladi (monitorlar hozircha bo'sh). Viewer tanlovi Bosqich 5 da (Settings xabari)
+- [x] `cargo test --workspace` Windows va Ubuntu'da o'tdi (loopback testlari bilan)
+- [x] Qo'lda test: Windows Viewer -> Ubuntu Host (LAN, 192.168.2.x), parol bilan ulandi, ping 2-3 ms (bir martalik sakrash 80 ms). Noto'g'ri parol rad etilishi loopback testda tasdiqlangan
   - Avtomatik loopback testlari yozilgan: `crates/rdcore/tests/loopback.rs` (muvaffaqiyatli ulanish va ping, noto'g'ri parol, blok, tasdiqlanmagan Host, o'zgargan fingerprint)
 
 ### Bosqich 2. Linux Host: ekran olish va kodlash
 
 **Go/no-go tekshiruv (birinchi qilinadi).** Q6 sababli qarovsiz ishlash Ubuntu 26.04'da amalda ishlashi kerak. Kichik prototip bilan tekshiramiz, shundan keyingina qolgan ishga o'tamiz.
-- [ ] Prototip: ScreenCast + RemoteDesktop portallarini bitta sessiyada ochish
+- [~] Prototip: `crates/portal-probe` (ashpd 0.11) yozildi: ScreenCast + RemoteDesktop bitta sessiyada, restore token saqlash, kursorni surish sinovi. Ubuntu: GNOME Shell 50.1, xdg-desktop-portal 1.21.1, portal-gnome 50.0, PipeWire 1.6.2, libei 1.5. Foydalanuvchi build qilib sinashi kerak
 - [ ] Birinchi marta ruxsat berish (foydalanuvchi oldida), restore token saqlash
 - [ ] Qayta ishga tushirishdan keyin token bilan **dialogsiz** sessiya ochilishini tekshirish (ham ekran, ham kiritish)
 - [ ] Ekran qulflanganda, o'chganda va uyquga ketganda holatni tekshirish
@@ -182,6 +183,8 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 |---|---|
 | 2026-10-29 | Reja tuzildi, qarorlar qabul qilindi |
 | 2026-10-29 | Bosqich 0 deyarli tayyor: workspace, git, build skriptlari yaratildi. Bo'sh workspace Linux'da `cargo test` va `cargo build --release` bilan tekshirildi. Qolgan: foydalanuvchi Rust'ni o'rnatadi |
+| 2026-10-29 | **Bosqich 1 yopildi.** Haqiqiy tarmoqda Windows Viewer Ubuntu Host'ga ulandi, autentifikatsiya va ping ishladi (ping ~2 ms LAN'da) |
+| 2026-10-29 | `cargo test --workspace` Windows va Ubuntu'da muvaffaqiyatli o'tdi. Bosqich 1 avtomatik testlari tayyor. Qoldi: Windows Viewer -> Ubuntu Host qo'lda ulanish sinovi (haqiqiy tarmoq orqali) |
 | 2026-10-29 | Bosqich 1 kodi yozildi (protokol, auth, QUIC server/klient, CLI). Protokol va std-only modullarning 23 ta testi Claude tomonda o'tdi, tarmoq/kripto qismi faqat sintaksis jihatdan tekshirildi. Kompilyatsiya va testlar foydalanuvchi kompyuterida kutilmoqda |
 | 2026-10-29 | Qaror: foydalanuvchida akkaunt sozlamasiga kirish yo'q, shuning uchun lokal build yo'li tanlandi |
 | 2026-10-29 | **To'siq (hal qilindi lokal build bilan):** Claude ishlaydigan muhitdan crates.io ga ulanib bo'lmaydi (tarmoq ruxsati yo'q), shuning uchun tashqi kutubxonali kod (QUIC va boshqalar) Claude tomonda kompilyatsiya qilinmaydi. Yechim kutilmoqda |
