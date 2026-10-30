@@ -53,6 +53,7 @@ enum Screen {
 struct Form {
     name: String,
     addr: String,
+    port: String,
     password: String,
     show_password: bool,
     fps: u16,
@@ -101,6 +102,7 @@ impl App {
             form: Form {
                 name: String::new(),
                 addr: String::new(),
+                port: protocol::DEFAULT_PORT.to_string(),
                 password: String::new(),
                 show_password: false,
                 fps: 30,
@@ -129,7 +131,16 @@ impl App {
         if let Some(h) = self.hosts.get(i).cloned() {
             self.selected = Some(i);
             self.form.name = h.name;
-            self.form.addr = h.addr;
+            match h.addr.rsplit_once(':') {
+                Some((host, port)) if !host.contains(':') && port.parse::<u16>().is_ok() => {
+                    self.form.addr = host.to_string();
+                    self.form.port = port.to_string();
+                }
+                _ => {
+                    self.form.addr = h.addr;
+                    self.form.port = protocol::DEFAULT_PORT.to_string();
+                }
+            }
             self.form.fps = h.fps;
             self.form.kbps = h.kbps;
             self.form.height = h.height;
@@ -138,22 +149,37 @@ impl App {
         }
     }
 
+    /// Manzil + port (`IP:port`). Manzil maydoniga port allaqachon yozilgan bo'lsa, o'sha ishlatiladi.
+    fn full_addr(&self) -> String {
+        let host = self.form.addr.trim();
+        if host.contains(':') {
+            return host.to_string();
+        }
+        let port = self.form.port.trim();
+        format!("{host}:{}", if port.is_empty() { protocol::DEFAULT_PORT.to_string() } else { port.to_string() })
+    }
+
     fn connect(&mut self, ctx: &egui::Context) {
+        let full = self.full_addr();
         let f = &self.form;
         if f.addr.trim().is_empty() {
-            self.error = Some("Manzilni kiriting (IP yoki IP:port)".into());
+            self.error = Some("Manzilni kiriting".into());
             return;
         }
         self.error = None;
         self.fingerprint.clear();
-        self.title = if f.name.trim().is_empty() { f.addr.trim().to_string() } else { format!("{} ({})", f.name.trim(), f.addr.trim()) };
+        if self.form.port.trim().parse::<u16>().is_err() && !f.addr.contains(':') {
+            self.error = Some("Port 1 dan 65535 gacha son bo'lishi kerak".into());
+            return;
+        }
+        self.title = if f.name.trim().is_empty() { full.clone() } else { format!("{} ({})", f.name.trim(), full) };
         self.input_on = f.input;
         self.tex = None;
         self.fwd = input::Forwarder::default();
         self.handle = Some(session::start(
             ctx.clone(),
             session::Params {
-                addr: f.addr.trim().to_string(),
+                addr: full,
                 password: f.password.clone(),
                 fps: f.fps,
                 kbps: f.kbps,
@@ -167,10 +193,11 @@ impl App {
         if !self.form.save {
             return;
         }
+        let full = self.full_addr();
         let f = &self.form;
         let entry = SavedHost {
-            name: if f.name.trim().is_empty() { f.addr.trim().to_string() } else { f.name.trim().to_string() },
-            addr: f.addr.trim().to_string(),
+            name: if f.name.trim().is_empty() { full.clone() } else { f.name.trim().to_string() },
+            addr: full,
             fps: f.fps,
             kbps: f.kbps,
             height: f.height,
@@ -296,7 +323,11 @@ impl App {
                     ui.add(egui::TextEdit::singleline(&mut self.form.name).hint_text("masalan: Ofis Ubuntu"));
                     ui.end_row();
                     ui.label("Manzil");
-                    ui.add(egui::TextEdit::singleline(&mut self.form.addr).hint_text("IP yoki IP:port"));
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut self.form.addr).desired_width(170.0).hint_text("IP yoki nom"));
+                        ui.label("Port");
+                        ui.add(egui::TextEdit::singleline(&mut self.form.port).desired_width(60.0));
+                    });
                     ui.end_row();
                     ui.label("Parol");
                     ui.horizontal(|ui| {
