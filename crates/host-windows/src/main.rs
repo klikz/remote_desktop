@@ -1,18 +1,9 @@
-//! Host (Windows): ulanishni qabul qiladi, ekran videosini yuboradi va sichqoncha/klaviaturani bajaradi.
-
-#[cfg(windows)]
-mod capture;
-#[cfg(windows)]
-mod input;
-#[cfg(windows)]
-mod service;
-#[cfg(windows)]
-mod video;
+//! Host (Windows) buyruq qatori: `host-windows set-password | run`.
 
 #[cfg(windows)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    service::run().await
+    host_windows::run_cli().await
 }
 
 #[cfg(not(windows))]

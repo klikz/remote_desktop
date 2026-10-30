@@ -1,7 +1,8 @@
-//! Windows Host CLI va sessiya mantiqi (Linux Host bilan bir xil protokol).
+//! Windows Host: CLI, dastur ichidan boshqariladigan `RunningHost` va sessiya mantiqi
+//! (Linux Host bilan bir xil protokol).
 
 use crate::{input, video};
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use protocol::{video_reason, Capabilities, Message, VideoHeader, CODEC_H264, DEFAULT_PORT};
 use rdcore::{
     auth::Credentials,
@@ -13,9 +14,10 @@ use rdcore::{
 use std::{
     net::{IpAddr, SocketAddr},
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex,
     },
+    time::{Duration, Instant},
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
@@ -30,9 +32,18 @@ Buyruqlar:
                                        (standart: --bind 0.0.0.0, port: UI'da saqlangan yoki 7777)
 
 Birinchi ishga tushirishda Windows xavfsizlik devori (Firewall) so'raydi: \"Ruxsat berish\" ni bosing.
+Dasturning oynali versiyasida (`viewer`) \"Bu kompyuter\" bo'limidan ham yoqish mumkin.
 ";
 
-pub async fn run() -> Result<()> {
+fn dpi_aware() {
+    // Koordinatalar va o'lchamlar fizik pikselda bo'lishi uchun (ekran masshtabi 125% va h.k.).
+    // Jarayonda allaqachon o'rnatilgan bo'lsa, bu chaqiruv e'tiborsiz qoladi.
+    unsafe {
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+}
+
+pub async fn run_cli() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("set-password") => set_password(),
@@ -58,11 +69,7 @@ fn set_password() -> Result<()> {
 }
 
 async fn run_host(args: &[String]) -> Result<()> {
-    // Koordinatalar va o'lchamlar fizik pikselda bo'lishi uchun (ekran masshtabi 125% va h.k.)
-    unsafe {
-        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    }
-
+    dpi_aware();
     let mut ip: IpAddr = "0.0.0.0".parse()?;
     let mut port: u16 = paths::read_host_port().unwrap_or(DEFAULT_PORT);
     let mut it = args.iter();
@@ -73,20 +80,143 @@ async fn run_host(args: &[String]) -> Result<()> {
             other => bail!("noma'lum argument: {other}\n\n{USAGE}"),
         }
     }
-
-    let dir = paths::config_dir()?;
-    let identity = HostIdentity::load_or_create(&dir)?;
-    let creds = Credentials::load(&paths::host_password_file()?)
-        .context("parol o'rnatilmagan. Avval `host-windows set-password` yoki dasturdagi \"Bu kompyuter\" bo'limi")?;
-    let caps = Capabilities { codecs: CODEC_H264, max_fps: 60, monitors: vec![] };
-
-    let host = Host::bind(SocketAddr::new(ip, port), &identity, creds, caps)?;
+    let host = bind_host(ip, port)?;
     println!("Host ishga tushdi: {} (UDP)", host.local_addr()?);
     println!("Fingerprint: {}", hexfmt::colon(&host.fingerprint()));
     println!("Viewer birinchi ulanishda shu fingerprint'ni tasdiqlaydi. To'xtatish: Ctrl+C");
+    host.run_with(make_handler(Arc::new(Shared::default()))).await
+}
 
-    let handler: Handler = Arc::new(|io| Box::pin(session(io)));
-    host.run_with(handler).await
+/// Sertifikat va parolni o'qib, UDP portni ochadi. Tokio runtime ichida chaqirilishi kerak.
+fn bind_host(ip: IpAddr, port: u16) -> Result<Host> {
+    let dir = paths::config_dir()?;
+    let identity = HostIdentity::load_or_create(&dir)?;
+    let creds = Credentials::load(&paths::host_password_file()?)
+        .context("parol o'rnatilmagan: \"Bu kompyuter\" bo'limida yoki `host-windows set-password` bilan o'rnating")?;
+    let caps = Capabilities { codecs: CODEC_H264, max_fps: 60, monitors: vec![] };
+    Host::bind(SocketAddr::new(ip, port), &identity, creds, caps)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Dastur ichidan boshqarish
+// ---------------------------------------------------------------------------------------------
+
+struct Peer {
+    id: u64,
+    ip: IpAddr,
+    since: Instant,
+    conn: rdcore::quinn::Connection,
+}
+
+#[derive(Default)]
+struct Shared {
+    peers: Mutex<Vec<Peer>>,
+    next_id: AtomicU64,
+}
+
+/// Hozir ulangan Viewer haqida ma'lumot.
+#[derive(Clone, Debug)]
+pub struct PeerInfo {
+    pub id: u64,
+    pub ip: IpAddr,
+    pub since: Instant,
+}
+
+/// Dastur ichida ishlayotgan Host. `stop()` yoki `drop` uni to'xtatadi va portni bo'shatadi.
+pub struct RunningHost {
+    pub port: u16,
+    pub fingerprint: String,
+    shared: Arc<Shared>,
+    stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl RunningHost {
+    pub fn start(port: u16) -> Result<RunningHost> {
+        dpi_aware();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<std::result::Result<String, String>>();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let shared = Arc::new(Shared::default());
+        let sh = shared.clone();
+        let thread = std::thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    let _ = ready_tx.send(Err(format!("tokio: {e}")));
+                    return;
+                }
+            };
+            rt.block_on(async {
+                let host = match bind_host("0.0.0.0".parse().unwrap(), port) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(format!("{e:#}")));
+                        return;
+                    }
+                };
+                let _ = ready_tx.send(Ok(hexfmt::colon(&host.fingerprint())));
+                tokio::select! {
+                    r = host.run_with(make_handler(sh.clone())) => {
+                        if let Err(e) = r {
+                            eprintln!("[host] to'xtadi: {e:#}");
+                        }
+                    }
+                    _ = stop_rx => {}
+                }
+                // Ulanganlarga yopilish sababini aytib, ularni tartib bilan uzamiz
+                for p in sh.peers.lock().unwrap().iter() {
+                    p.conn.close(0u32.into(), b"host stopped");
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            });
+            rt.shutdown_timeout(Duration::from_secs(2));
+        });
+        match ready_rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(Ok(fingerprint)) => Ok(RunningHost { port, fingerprint, shared, stop_tx: Some(stop_tx), thread: Some(thread) }),
+            Ok(Err(e)) => {
+                let _ = thread.join();
+                Err(anyhow!(e))
+            }
+            Err(_) => Err(anyhow!("Host ishga tushmadi (vaqt tugadi)")),
+        }
+    }
+
+    pub fn peers(&self) -> Vec<PeerInfo> {
+        self.shared.peers.lock().unwrap().iter().map(|p| PeerInfo { id: p.id, ip: p.ip, since: p.since }).collect()
+    }
+
+    /// Ulangan Viewer'ni uzadi.
+    pub fn kick(&self, id: u64) {
+        if let Some(p) = self.shared.peers.lock().unwrap().iter().find(|p| p.id == id) {
+            p.conn.close(0u32.into(), b"kicked");
+        }
+    }
+
+    pub fn stop(mut self) {
+        self.shutdown();
+    }
+
+    fn shutdown(&mut self) {
+        if let Some(tx) = self.stop_tx.take() {
+            let _ = tx.send(());
+        }
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+impl Drop for RunningHost {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+fn make_handler(shared: Arc<Shared>) -> Handler {
+    Arc::new(move |io| {
+        let sh = shared.clone();
+        Box::pin(session(io, sh))
+    })
 }
 
 struct Video {
@@ -105,7 +235,10 @@ impl Video {
 }
 
 /// Bitta Viewer sessiyasi: control xabarlari, video va kiritish.
-async fn session(mut io: SessionIo) {
+async fn session(mut io: SessionIo, shared: Arc<Shared>) {
+    let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
+    shared.peers.lock().unwrap().push(Peer { id, ip: io.peer, since: Instant::now(), conn: io.conn.clone() });
+    println!("[host] {}: ulandi", io.peer);
     let mut video: Option<Video> = None;
     loop {
         match read_message(&mut io.recv).await {
@@ -135,6 +268,8 @@ async fn session(mut io: SessionIo) {
     if let Some(v) = video {
         v.stop();
     }
+    shared.peers.lock().unwrap().retain(|p| p.id != id);
+    println!("[host] {}: uzildi", io.peer);
     io.conn.close(0u32.into(), b"bye");
 }
 
