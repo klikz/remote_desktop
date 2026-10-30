@@ -225,6 +225,15 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             let index = want.min(mons.len() - 1);
             let m = mons[index];
             cur = m;
+            // Sinov uchun: RD_POINTER_SIZE=3840x2160 koordinata fazosini qo'lda belgilaydi
+            if let Some((w, h)) = std::env::var("RD_POINTER_SIZE").ok().and_then(|v| {
+                let (w, h) = v.split_once('x')?;
+                Some((w.trim().parse::<i32>().ok()?, h.trim().parse::<i32>().ok()?))
+            }) {
+                cur.w = w;
+                cur.h = h;
+            }
+            eprintln!("[portal] kiritish koordinata fazosi: {}x{}", cur.w, cur.h);
             match sc.open_pipe_wire_remote(&session).await {
                 Ok(fd) => {
                     let _ = reply.send(Ok(StreamInfo {

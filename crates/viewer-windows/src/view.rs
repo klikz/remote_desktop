@@ -253,7 +253,7 @@ struct InputState {
 }
 
 impl InputState {
-    fn poll(&mut self, w: &Window, tx: &UnboundedSender<InputEvent>, rect: (usize, usize, usize, usize)) {
+    fn poll(&mut self, w: &mut Window, tx: &UnboundedSender<InputEvent>, rect: (usize, usize, usize, usize)) {
         if !w.is_active() {
             self.release_all(tx);
             return;
