@@ -5,7 +5,7 @@ mod gui;
 use anyhow::{bail, Context, Result};
 use protocol::DEFAULT_PORT;
 use rdcore::{
-    client::{connect, ConnectOptions},
+    client::{connect_with, ConnectOptions, Transport},
     known_hosts::KnownHosts,
     paths,
 };
@@ -22,7 +22,7 @@ viewer: Remote Desktop Viewer
 
 Foydalanish:
   viewer                               oynali interfeys (tavsiya etiladi)
-  viewer connect <manzil[:port]> [--video SEKUND] [--fps N] [--kbps N] [--height N] [--monitor N] [--out FAYL.h264]
+  viewer connect <manzil[:port]> [--video SEKUND] [--fps N] [--kbps N] [--height N] [--monitor N] [--tcp | --udp] [--out FAYL.h264]
 
 Buyruq qatori sinov uchun:
   viewer connect 192.168.2.226                 ulanish va ping sinovi
@@ -37,6 +37,7 @@ struct Options {
     max_height: u16,
     monitor: u8,
     out: Option<PathBuf>,
+    transport: Transport,
 }
 
 fn main() -> Result<()> {
@@ -54,7 +55,7 @@ fn main() -> Result<()> {
 async fn cli_main(args: Vec<String>) -> Result<()> {
     match (args.first().map(String::as_str), args.get(1)) {
         (Some("connect"), Some(target)) => {
-            let mut opts = Options { video_secs: 0, fps: 30, kbps: 10000, max_height: 1080, monitor: 0, out: None };
+            let mut opts = Options { video_secs: 0, fps: 30, kbps: 10000, max_height: 1080, monitor: 0, out: None, transport: Transport::Auto };
             let mut it = args[2..].iter();
             while let Some(a) = it.next() {
                 match a.as_str() {
@@ -63,6 +64,8 @@ async fn cli_main(args: Vec<String>) -> Result<()> {
                     "--kbps" => opts.kbps = it.next().context("--kbps uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
                     "--height" => opts.max_height = it.next().context("--height uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
                     "--monitor" => opts.monitor = it.next().context("--monitor uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
+                    "--tcp" => opts.transport = Transport::Tcp,
+                    "--udp" => opts.transport = Transport::Udp,
                     "--out" => opts.out = Some(PathBuf::from(it.next().context("--out uchun yo'l kerak")?)),
                     other => bail!("noma'lum argument: {other}\n\n{USAGE}"),
                 }
@@ -118,14 +121,12 @@ async fn run_connect(target: &str, opts: Options) -> Result<()> {
     };
 
     println!("{addr} ga ulanilmoqda...");
-    let mut session = connect(ConnectOptions {
-        addr,
-        password: &password,
-        known_hosts: &known_hosts,
-        confirm_new_host: &confirm,
-    })
+    let mut session = connect_with(
+        ConnectOptions { addr, password: &password, known_hosts: &known_hosts, confirm_new_host: &confirm },
+        opts.transport,
+    )
     .await?;
-    println!("Ulandi. Host imkoniyatlari: {:?}", session.host_caps);
+    println!("Ulandi{}. Host imkoniyatlari: {:?}", session.host_caps);
 
     if opts.video_secs > 0 {
         receive_video(&mut session, &opts).await?;

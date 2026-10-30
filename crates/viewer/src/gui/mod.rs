@@ -11,6 +11,7 @@ mod session;
 
 use egui::{Align, Align2, Color32, Key, Layout, RichText, TextureHandle, TextureOptions, ViewportCommand};
 use hosts::SavedHost;
+use rdcore::client::Transport;
 use std::{
     sync::{atomic::Ordering, mpsc},
     time::{Duration, Instant},
@@ -55,6 +56,7 @@ struct Form {
     addr: String,
     port: String,
     password: String,
+    transport: Transport,
     show_password: bool,
     fps: u16,
     kbps: u32,
@@ -104,6 +106,7 @@ impl App {
                 addr: String::new(),
                 port: protocol::DEFAULT_PORT.to_string(),
                 password: String::new(),
+                transport: Transport::Auto,
                 show_password: false,
                 fps: 30,
                 kbps: 8000,
@@ -184,6 +187,7 @@ impl App {
                 fps: f.fps,
                 kbps: f.kbps,
                 height: f.height,
+                transport: f.transport,
             },
         ));
         self.screen = Screen::Connecting;
@@ -237,7 +241,10 @@ impl App {
             while let Ok(ev) = h.events.try_recv() {
                 match ev {
                     session::Event::Confirm(fp, tx) => self.confirm = Some((fp, tx)),
-                    session::Event::Connected { fingerprint } => {
+                    session::Event::Connected { fingerprint, via_tcp } => {
+                        if via_tcp {
+                            self.title.push_str(" [TCP]");
+                        }
                         self.fingerprint = fingerprint;
                         connected = true;
                     }
@@ -327,6 +334,18 @@ impl App {
                         ui.add(egui::TextEdit::singleline(&mut self.form.addr).desired_width(170.0).hint_text("IP yoki nom"));
                         ui.label("Port");
                         ui.add(egui::TextEdit::singleline(&mut self.form.port).desired_width(60.0));
+                    });
+                    ui.end_row();
+                    ui.label("Ulanish turi");
+                    let tname = |t: Transport| match t {
+                        Transport::Auto => "Avto (UDP, bo'lmasa TCP)",
+                        Transport::Udp => "UDP",
+                        Transport::Tcp => "TCP",
+                    };
+                    egui::ComboBox::from_id_salt("transport").selected_text(tname(self.form.transport)).show_ui(ui, |ui| {
+                        for t in [Transport::Auto, Transport::Udp, Transport::Tcp] {
+                            ui.selectable_value(&mut self.form.transport, t, tname(t));
+                        }
                     });
                     ui.end_row();
                     ui.label("Parol");

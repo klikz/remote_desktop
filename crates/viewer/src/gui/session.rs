@@ -5,7 +5,7 @@ use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 use protocol::{InputEvent, DEFAULT_PORT};
 use rdcore::{
-    client::{connect, ConnectOptions},
+    client::{connect_with, ConnectOptions, Transport},
     known_hosts::KnownHosts,
     paths,
 };
@@ -27,6 +27,7 @@ pub struct Params {
     pub fps: u16,
     pub kbps: u32,
     pub height: u16,
+    pub transport: Transport,
 }
 
 /// Dekodlangan kadr (RGB, 3 bayt/piksel).
@@ -48,7 +49,7 @@ pub struct Shared {
 pub enum Event {
     /// Birinchi ulanish: fingerprint'ni foydalanuvchi tasdiqlashi kerak.
     Confirm(String, mpsc::Sender<bool>),
-    Connected { fingerprint: String },
+    Connected { fingerprint: String, via_tcp: bool },
     VideoStarted,
     /// Ulanish tugadi. `Some` = xato matni.
     Ended(Option<String>),
@@ -138,14 +139,12 @@ async fn run(
         rx.recv().unwrap_or(false)
     };
 
-    let mut session = connect(ConnectOptions {
-        addr,
-        password: &p.password,
-        known_hosts: &known_hosts,
-        confirm_new_host: &confirm,
-    })
+    let mut session = connect_with(
+        ConnectOptions { addr, password: &p.password, known_hosts: &known_hosts, confirm_new_host: &confirm },
+        p.transport,
+    )
     .await?;
-    let _ = ev_tx.send(Event::Connected { fingerprint: session.fingerprint.clone() });
+    let _ = ev_tx.send(Event::Connected { fingerprint: session.fingerprint.clone(), via_tcp: session.via_tcp });
     ctx.request_repaint();
 
     let mut stream = session.request_video(p.fps, p.kbps, p.height, 0).await?;
