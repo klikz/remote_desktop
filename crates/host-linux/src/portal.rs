@@ -37,6 +37,7 @@ struct Mon {
 enum Cmd {
     OpenStream(usize, oneshot::Sender<Result<StreamInfo>>),
     Input(InputEvent),
+    SetSpace(i32, i32),
 }
 
 #[derive(Clone)]
@@ -59,6 +60,11 @@ impl PortalHandle {
         } else {
             let _ = self.tx.send(Cmd::Input(ev)).await;
         }
+    }
+
+    /// Sichqoncha koordinatalari fazosini (oqimning haqiqiy piksel o'lchami) belgilaydi.
+    pub async fn set_pointer_space(&self, w: i32, h: i32) {
+        let _ = self.tx.send(Cmd::SetSpace(w, h)).await;
     }
 
     /// Ekran oqimi uchun PipeWire ulanishini so'raydi (kerak bo'lsa sessiyani ochadi).
@@ -98,7 +104,7 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             },
         };
 
-        if matches!(first, Cmd::Input(_)) {
+        if matches!(first, Cmd::Input(_) | Cmd::SetSpace(..)) {
             continue; // sessiya yo'q: kiritish hodisasi e'tiborsiz qoldiriladi
         }
 
@@ -217,6 +223,14 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                             let st = if pressed { KeyState::Pressed } else { KeyState::Released };
                             let _ = rd.notify_keyboard_keycode(&session, code as i32, st).await;
                         }
+                    }
+                    continue;
+                }
+                Cmd::SetSpace(w, h) => {
+                    if std::env::var_os("RD_POINTER_SIZE").is_none() && w > 0 && h > 0 {
+                        cur.w = w;
+                        cur.h = h;
+                        eprintln!("[portal] kiritish koordinata fazosi: {w}x{h}");
                     }
                     continue;
                 }

@@ -9,7 +9,7 @@ use std::{
     os::fd::{AsRawFd, OwnedFd},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 use tokio::sync::mpsc;
@@ -28,6 +28,8 @@ pub struct Capture {
     pub frames: mpsc::Receiver<Frame>,
     pub errors: mpsc::UnboundedReceiver<String>,
     pub encoder: &'static str,
+    /// PipeWire bergan haqiqiy kadr o'lchami (piksel). Caps kelishilgach to'ladi.
+    pub source_size: Arc<Mutex<Option<(i32, i32)>>>,
     stop: Arc<AtomicBool>,
     _fd: OwnedFd,
 }
@@ -106,7 +108,7 @@ pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32, max_height: u32, sr
         String::new()
     };
     let desc = format!(
-        "pipewiresrc fd={} path={} do-timestamp=true ! videoconvert ! videoscale ! videorate ! \
+        "pipewiresrc name=src fd={} path={} do-timestamp=true ! videoconvert ! videoscale ! videorate ! \
          video/x-raw,framerate={}/1{} ! {} ! video/x-h264,stream-format=byte-stream,alignment=au ! \
          appsink name=sink sync=false max-buffers=4 drop=true",
         fd.as_raw_fd(),
@@ -126,6 +128,24 @@ pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32, max_height: u32, sr
         .ok_or_else(|| fail(video_reason::NO_CAPTURE, anyhow!("appsink topilmadi")))?
         .downcast::<gst_app::AppSink>()
         .map_err(|_| fail(video_reason::NO_CAPTURE, anyhow!("appsink turi noto'g'ri")))?;
+
+    // Manba kadr o'lchami: masshtabli ekranlarda (masalan 133%) logik o'lchamdan farq qiladi.
+    let source_size: Arc<Mutex<Option<(i32, i32)>>> = Arc::new(Mutex::new(None));
+    if let Some(pad) = pipeline.by_name("src").and_then(|e| e.static_pad("src")) {
+        let size = source_size.clone();
+        pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |_, info| {
+            if let Some(gst::PadProbeData::Event(ref ev)) = info.data {
+                if let gst::EventView::Caps(c) = ev.view() {
+                    if let Some(s) = c.caps().structure(0) {
+                        if let (Ok(w), Ok(h)) = (s.get::<i32>("width"), s.get::<i32>("height")) {
+                            *size.lock().unwrap() = Some((w, h));
+                        }
+                    }
+                }
+            }
+            gst::PadProbeReturn::Ok
+        });
+    }
 
     let (tx, rx) = mpsc::channel::<Frame>(8);
     // Kanal to'lsa (Viewer sekin), keyingi kalit kadrgacha kadrlarni tashlaymiz,
@@ -196,6 +216,7 @@ pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32, max_height: u32, sr
         frames: rx,
         errors: err_rx,
         encoder,
+        source_size,
         stop,
         _fd: fd,
     })

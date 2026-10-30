@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use crate::keymap;
-use minifb::{Key, KeyRepeat, MouseButton, MouseMode, ScaleMode, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, MouseButton, ScaleMode, Window, WindowOptions};
 use protocol::InputEvent;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use openh264::decoder::Decoder;
@@ -26,6 +26,65 @@ struct Picture {
 
 type Slot = Arc<Mutex<Option<Picture>>>;
 
+/// Oyna va sichqoncha o'lchamlari. Windows'da hammasi to'g'ridan-to'g'ri Win32 dan, bitta birlikda
+/// (fizik piksel) olinadi, shuning uchun ekran masshtabi (125%, 150%...) koordinatani buzmaydi.
+#[cfg(windows)]
+mod plat {
+    use minifb::Window;
+    use windows_sys::Win32::{
+        Foundation::{HWND, POINT, RECT},
+        Graphics::Gdi::ScreenToClient,
+        UI::{
+            HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2},
+            WindowsAndMessaging::{GetClientRect, GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN},
+        },
+    };
+
+    /// Jarayonni DPI'ga mos deb belgilaydi: Windows oynani cho'zmaydi, koordinatalar fizik pikselda.
+    pub fn dpi_aware() {
+        unsafe {
+            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+    }
+
+    pub fn screen_size() -> (usize, usize) {
+        unsafe { (GetSystemMetrics(SM_CXSCREEN).max(640) as usize, GetSystemMetrics(SM_CYSCREEN).max(480) as usize) }
+    }
+
+    pub fn client_size(w: &Window) -> (usize, usize) {
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe {
+            GetClientRect(w.get_window_handle() as HWND, &mut r);
+        }
+        ((r.right - r.left).max(0) as usize, (r.bottom - r.top).max(0) as usize)
+    }
+
+    pub fn cursor(w: &Window) -> Option<(f32, f32)> {
+        let mut p = POINT { x: 0, y: 0 };
+        unsafe {
+            if GetCursorPos(&mut p) == 0 || ScreenToClient(w.get_window_handle() as HWND, &mut p) == 0 {
+                return None;
+            }
+        }
+        Some((p.x as f32, p.y as f32))
+    }
+}
+
+#[cfg(not(windows))]
+mod plat {
+    use minifb::{MouseMode, Window};
+    pub fn dpi_aware() {}
+    pub fn screen_size() -> (usize, usize) {
+        (1920, 1080)
+    }
+    pub fn client_size(w: &Window) -> (usize, usize) {
+        w.get_size()
+    }
+    pub fn cursor(w: &Window) -> Option<(f32, f32)> {
+        w.get_mouse_pos(MouseMode::Pass)
+    }
+}
+
 pub async fn run(session: &mut Session, fps: u16, kbps: u32, max_height: u16, monitor: u8, input: bool) -> Result<()> {
     println!("Video so'ralmoqda: {fps} FPS, {kbps} kbit/s, balandlik {max_height}...");
     let mut stream = session.request_video(fps, kbps, max_height, monitor).await?;
@@ -34,6 +93,7 @@ pub async fn run(session: &mut Session, fps: u16, kbps: u32, max_height: u16, mo
         println!("Boshqaruv yoqilgan: sichqoncha va klaviatura Host'ga uzatiladi (faqat ko'rish: --no-input).");
     }
 
+    plat::dpi_aware();
     let stop = Arc::new(AtomicBool::new(false));
     let slot: Slot = Arc::new(Mutex::new(None));
     let (tx, rx) = sync_channel::<(bool, Vec<u8>)>(8);
@@ -198,7 +258,9 @@ fn window_loop(slot: Slot, stop: Arc<AtomicBool>, input: Option<UnboundedSender<
             continue;
         };
         if window.is_none() {
-            let scale = (1920.0 / p.w as f64).min(1000.0 / p.h as f64).min(1.0);
+            // Ekranga sig'adigan o'lcham (fizik piksel); kattalashtirish uchun oynani maksimallashtiring
+            let (sw, sh) = plat::screen_size();
+            let scale = (sw as f64 * 0.9 / p.w as f64).min(sh as f64 * 0.85 / p.h as f64).min(1.0);
             let (ww, wh) = (((p.w as f64) * scale) as usize, ((p.h as f64) * scale) as usize);
             let mut w = Window::new(
                 "Remote Desktop",
@@ -224,7 +286,7 @@ fn window_loop(slot: Slot, stop: Arc<AtomicBool>, input: Option<UnboundedSender<
             }
             inp.poll(w, tx, rect);
         }
-        let size = w.get_size();
+        let size = plat::client_size(w);
         if size.0 == 0 || size.1 == 0 {
             w.update();
             continue;
@@ -250,6 +312,7 @@ struct InputState {
     last_pos: Option<(u16, u16)>,
     buttons: [bool; 3],
     keys: Vec<(Key, u32)>,
+    last_dbg: Option<Instant>,
 }
 
 impl InputState {
@@ -260,7 +323,19 @@ impl InputState {
         }
         let (ox, oy, dw, dh) = rect;
         let mut inside = false;
-        if let Some((mx, my)) = w.get_mouse_pos(MouseMode::Discard) {
+        if std::env::var_os("RD_DEBUG").is_some() {
+            if let Some((mx, my)) = plat::cursor(w) {
+                if self.last_dbg.map_or(true, |t| t.elapsed() >= Duration::from_secs(1)) {
+                    self.last_dbg = Some(Instant::now());
+                    eprintln!(
+                        "[dbg] oyna(win32)={:?} oyna(minifb)={:?} sichqoncha=({mx:.0},{my:.0}) video=(x{ox},y{oy},{dw}x{dh})",
+                        plat::client_size(w),
+                        w.get_size()
+                    );
+                }
+            }
+        }
+        if let Some((mx, my)) = plat::cursor(w) {
             let (fx, fy) = ((mx - ox as f32) / dw as f32, (my - oy as f32) / dh as f32);
             if (0.0..=1.0).contains(&fx) && (0.0..=1.0).contains(&fy) {
                 inside = true;

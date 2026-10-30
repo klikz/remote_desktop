@@ -123,7 +123,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [~] Viewer'da klaviatura hodisalari: jismoniy klavish -> evdev kodi (`keymap.rs`); chiqish Ctrl+Alt+Q. Windows/Alt+Tab kabi tizim tugmalari hali ushlanmaydi
 - [~] Koordinata kadr bo'yicha 0..65535 (nisbiy) yuboriladi, letterbox hisobga olinadi
 - [~] Host'da RemoteDesktop portali orqali bajarish (notify_pointer_motion_absolute/button/axis, keyboard_keycode). Sinov kutilmoqda
-- [ ] Ko'p monitorli Host'da koordinatani to'g'ri moslashtirish
+- [~] Masshtabli ekranlarda koordinata: Host kiritish fazosini PipeWire kadrining haqiqiy o'lchamidan oladi (GNOME 133%: 3840x2160, portal esa logik 2880x1620 beradi); Viewer DPI-aware (Windows 125%), oyna va sichqoncha Win32 dan bir birlikda. Ko'p monitor hali sinalmagan
 - [ ] Kursor ko'rinishini uzatish
 - [ ] Test: Windows'dan Ubuntu'ni boshqarish, input kechikishi o'lchovi
 
@@ -201,3 +201,4 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-29 | Q1-Q3 javoblari qo'shildi: Linux (Ubuntu GNOME Wayland) Host, Windows Viewer, oq IP bor. Bosqichlar shunga qayta tartiblandi |
 | 2026-10-29 | Video yuborish tarmoq orqali muvaffaqiyatli sinaldi (30.3 FPS, 3.3 Mbit/s, 262 ms). Bosqich 3 boshlandi: VideoRequest ga `max_height` qo'shildi, Viewer'ga `--view` (dekodlash + oyna) yozildi, build kutilmoqda |
 | 2026-10-30 | Video nisbati to'g'rilandi (Host kenglikni hisoblaydi), box-filter masshtab. Kiritish (sichqoncha/klaviatura) protokoli, Host portali va Viewer ulandi, build/sinov kutilmoqda. Yozuv aniqligi (zoom/pan, kodlagich sozlamasi) keyinga qoldirildi |
+| 2026-10-30 | Sichqoncha masshtab xatosi topildi: Ubuntu 133% (logik vs fizik, x0.75) va Windows 125% (DPI, x1.25). Ikkalasi tuzatildi, sinov kutilmoqda |

@@ -156,6 +156,24 @@ async fn start_video(
         if max_height == 0 { "asl".to_string() } else { max_height.to_string() },
         cap.encoder
     );
+    // Sichqoncha koordinatalari oqimning haqiqiy piksel fazosida bo'lishi kerak (GNOME masshtabida
+    // logik o'lchamdan katta). Caps kelishilgach portalga aytamiz.
+    {
+        let size = cap.source_size.clone();
+        let portal = portal.clone();
+        tokio::spawn(async move {
+            for _ in 0..100 {
+                let got = *size.lock().unwrap();
+                if let Some((w, h)) = got {
+                    println!("[host] manba kadr: {w}x{h} (logik {width}x{height})");
+                    portal.set_pointer_space(w, h).await;
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            eprintln!("[host] manba kadr o'lchami aniqlanmadi, logik o'lcham ishlatiladi");
+        });
+    }
     let conn = io.conn.clone();
     Ok((tokio::spawn(video_sender(conn, cap)), fps, kbps))
 }
