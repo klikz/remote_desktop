@@ -27,8 +27,15 @@ toolchain:
 build: toolchain
 	bash scripts/build-viewer.sh
 
+HOST_BIN := $(HOME)/.local/bin/remote-desktop-host
+
 install-host: build
-	@if [ -f target/release/host-linux ] && systemctl --user is-enabled remote-desktop-host >/dev/null 2>&1; then \n	  if ! cmp -s target/release/host-linux $(HOME)/.local/bin/remote-desktop-host; then \n	    echo "Host yangilanmoqda..."; \n	    install -m 755 target/release/host-linux $(HOME)/.local/bin/remote-desktop-host.new && \n	    mv -f $(HOME)/.local/bin/remote-desktop-host.new $(HOME)/.local/bin/remote-desktop-host && \n	    systemctl --user restart remote-desktop-host; \n	  fi; \n	fi
+	@if [ -f target/release/host-linux ] && systemctl --user is-enabled remote-desktop-host >/dev/null 2>&1 \
+	   && ! cmp -s target/release/host-linux $(HOST_BIN); then \
+	  echo "Host yangilanmoqda..."; \
+	  install -m 755 target/release/host-linux $(HOST_BIN).new && mv -f $(HOST_BIN).new $(HOST_BIN) \
+	  && systemctl --user restart remote-desktop-host; \
+	fi
 
 run: install-host
 	@test -x $(VIEWER) || { echo "$(VIEWER) topilmadi"; exit 1; }
