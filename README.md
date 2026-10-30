@@ -9,6 +9,7 @@ Cross-platform remote desktop. Reja va holat: [PLAN.md](PLAN.md).
 | `crates/protocol` | Xabarlar, versiya, konstantalar (ikkala tomon uchun umumiy) |
 | `crates/rdcore` | Transport (QUIC), autentifikatsiya, umumiy mantiq |
 | `crates/host-linux` | Host: Ubuntu (Wayland), ekran olish va kiritishni bajarish |
+| `crates/host-windows` | Host (Windows): ekran, kodlash, kiritishni bajarish |
 | `crates/viewer` | Viewer (Windows va Linux): oynali interfeys, ko'rsatish va kiritishni yuborish |
 
 ## Build

@@ -5,6 +5,7 @@ members = [
     "crates/rdcore",
     "crates/host-linux",
     "crates/viewer",
+    "crates/host-windows",
     "crates/portal-probe",
 ]
 
@@ -24,4 +25,8 @@ opt-level = 2
 
 # Viewer'ning o'z piksel sikllari dev rejimida ham tez ishlashi uchun
 [profile.dev.package.viewer]
+opt-level = 2
+
+# Windows Host: ekranni masshtablash va rang o'tkazish sikllari dev rejimida ham tez ishlashi uchun
+[profile.dev.package.host-windows]
 opt-level = 2
