@@ -3,12 +3,15 @@
 #   make update   faqat git pull
 #   make build    faqat build (pull qilmasdan)
 #   make run      pull qilmasdan, mavjud build ni ishga tushirish
+#   make push     hamma o'zgarishni commit (xabar ".") va push qilish; xabar: make push MSG="matn"
 #   make clean    build fayllarini o'chirish
 #   NO_HOST=1 make   GStreamer dev paketlarisiz (faqat Viewer)
 
 VIEWER := target/release/viewer
 
-.PHONY: all update build run clean
+MSG ?= .
+
+.PHONY: all update build run push clean
 
 all: update build run
 
@@ -21,6 +24,11 @@ build:
 run:
 	@test -x $(VIEWER) || { echo "$(VIEWER) topilmadi: avval make build"; exit 1; }
 	$(VIEWER)
+
+push:
+	git add -A
+	@git diff --cached --quiet || git commit -m "$(MSG)"
+	git push
 
 clean:
 	cargo clean
