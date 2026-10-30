@@ -184,6 +184,7 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
 
         let mut next = Some(first);
         let mut cur = mons[0];
+        let mut dbg_last: Option<std::time::Instant> = None;
         loop {
             let cmd = match next.take() {
                 Some(c) => c,
@@ -201,7 +202,19 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                         InputEvent::PointerMove { x, y } => {
                             let px = f64::from(x) / 65535.0 * f64::from(cur.w.max(1));
                             let py = f64::from(y) / 65535.0 * f64::from(cur.h.max(1));
-                            let _ = rd.notify_pointer_motion_absolute(&session, cur.node_id, px, py).await;
+                            let r = rd.notify_pointer_motion_absolute(&session, cur.node_id, px, py).await;
+                            if std::env::var_os("RD_DEBUG").is_some()
+                                && dbg_last.map_or(true, |t: std::time::Instant| t.elapsed().as_millis() >= 500)
+                            {
+                                dbg_last = Some(std::time::Instant::now());
+                                eprintln!(
+                                    "[dbg] viewer=({x},{y}) /65535 -> ubuntu=({px:.0},{py:.0}) fazo {}x{} node {} natija {:?}",
+                                    cur.w,
+                                    cur.h,
+                                    cur.node_id,
+                                    r.as_ref().map(|_| "ok").map_err(|e| e.to_string())
+                                );
+                            }
                         }
                         InputEvent::Button { button, pressed } => {
                             let code = match button {
