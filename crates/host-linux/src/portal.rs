@@ -148,6 +148,13 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             if let Some(t) = started.restore_token() {
                 save_token(&token_path, t)?;
             }
+            let devices = started.devices();
+            eprintln!("[portal] ruxsat etilgan qurilmalar: {devices:?}");
+            if !devices.contains(DeviceType::Pointer) || !devices.contains(DeviceType::Keyboard) {
+                // Eski ruxsatda boshqarish berilmagan: token o'chiriladi, keyingi safar GNOME qayta so'raydi
+                eprintln!("[portal] OGOHLANTIRISH: sichqoncha/klaviatura ruxsati yo'q; ruxsat qayta so'raladi");
+                let _ = std::fs::remove_file(&token_path);
+            }
             let mut mons: Vec<Mon> = started
                 .streams()
                 .unwrap_or_default()
@@ -206,6 +213,7 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
         let mut cur = mons[0];
         let mut dbg_last: Option<std::time::Instant> = None;
         let mut phys: Option<(i32, i32)> = None;
+        let mut in_err = 0u32;
         loop {
             let cmd = match next.take() {
                 Some(c) => c,
@@ -239,6 +247,7 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                             if r.is_ok() && (rx > 0.5 || ry > 0.5) {
                                 r = rd.notify_pointer_motion(&session, rx.max(0.0), ry.max(0.0)).await;
                             }
+                            note_err(&mut in_err, "ko'rsatkich", &r);
                             if std::env::var_os("RD_DEBUG").is_some()
                                 && dbg_last.map_or(true, |t: std::time::Instant| t.elapsed().as_millis() >= 500)
                             {
@@ -258,11 +267,13 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                                 _ => 0x112, // BTN_MIDDLE
                             };
                             let st = if pressed { KeyState::Pressed } else { KeyState::Released };
-                            let _ = rd.notify_pointer_button(&session, code, st).await;
+                            let r = rd.notify_pointer_button(&session, code, st).await;
+                            note_err(&mut in_err, "tugma", &r);
                         }
                         InputEvent::Scroll { dx, dy } => {
                             if dy != 0 {
-                                let _ = rd.notify_pointer_axis_discrete(&session, Axis::Vertical, i32::from(dy)).await;
+                                let r = rd.notify_pointer_axis_discrete(&session, Axis::Vertical, i32::from(dy)).await;
+                                note_err(&mut in_err, "g'ildirak", &r);
                             }
                             if dx != 0 {
                                 let _ = rd.notify_pointer_axis_discrete(&session, Axis::Horizontal, i32::from(dx)).await;
@@ -270,7 +281,8 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                         }
                         InputEvent::Key { code, pressed } => {
                             let st = if pressed { KeyState::Pressed } else { KeyState::Released };
-                            let _ = rd.notify_keyboard_keycode(&session, code as i32, st).await;
+                            let r = rd.notify_keyboard_keycode(&session, code as i32, st).await;
+                            note_err(&mut in_err, "klavisha", &r);
                         }
                     }
                     continue;
@@ -323,5 +335,15 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             }
         }
         let _ = rd; // sessiya bilan birga tushadi
+    }
+}
+
+/// Kiritish xatolarining birinchi bir nechtasini logga yozadi (sabab ko'rinishi uchun, log to'lib ketmasin).
+fn note_err<T, E: std::fmt::Display>(count: &mut u32, what: &str, r: &Result<T, E>) {
+    if let Err(e) = r {
+        *count += 1;
+        if *count <= 10 {
+            eprintln!("[portal] kiritish xatosi ({what}): {e}");
+        }
     }
 }
