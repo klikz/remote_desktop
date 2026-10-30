@@ -113,17 +113,17 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Test: Ubuntu'dan lokal tarmoqda barqaror video, kechikish o'lchovi
 
 ### Bosqich 3. Windows Viewer: ko'rsatish
-- [~] Video oqimini qabul qilish va dekodlash: `viewer-windows connect <IP> --view` yozildi (openh264 dasturiy dekoder + minifb oyna, Esc - chiqish). Host `--height` bilan kichraytirib yuboradi (VideoRequest.max_height). Build va sinov kutilmoqda; apparat dekodlash (D3D11) keyinroq
+- [x] Video oqimini qabul qilish va dekodlash: `viewer-windows connect <IP> --view` yozildi (openh264 dasturiy dekoder + minifb oyna, Esc - chiqish). Host `--height` bilan kichraytirib yuboradi (VideoRequest.max_height). Build va sinov kutilmoqda; apparat dekodlash (D3D11) keyinroq
 - [ ] Viewer oynasida ko'rsatish (to'liq ekran, oynaga moslash, masshtab)
 - [ ] Ulanish holati va xatolarni ko'rsatish
 - [ ] Test: Windows oynasida Ubuntu ekrani ko'rinadi
 
 ### Bosqich 4. Boshqaruv (sichqoncha va klaviatura)
-- [~] Viewer'da sichqoncha harakati, bosish, g'ildirakni ushlash (minifb, `InputEvent` protokolda). Build va sinov kutilmoqda
-- [~] Viewer'da klaviatura hodisalari: jismoniy klavish -> evdev kodi (`keymap.rs`); chiqish Ctrl+Alt+Q. Windows/Alt+Tab kabi tizim tugmalari hali ushlanmaydi
-- [~] Koordinata kadr bo'yicha 0..65535 (nisbiy) yuboriladi, letterbox hisobga olinadi
-- [~] Host'da RemoteDesktop portali orqali bajarish (notify_pointer_motion_absolute/button/axis, keyboard_keycode). Sinov kutilmoqda
-- [~] Masshtabli ekranlarda koordinata: Host kiritish fazosini PipeWire kadrining haqiqiy o'lchamidan oladi (GNOME 133%: 3840x2160, portal esa logik 2880x1620 beradi); Viewer DPI-aware (Windows 125%), oyna va sichqoncha Win32 dan bir birlikda. Ko'p monitor hali sinalmagan
+- [x] Viewer'da sichqoncha harakati, bosish, g'ildirakni ushlash (minifb, `InputEvent` protokolda). Build va sinov kutilmoqda
+- [x] Viewer'da klaviatura hodisalari: jismoniy klavish -> evdev kodi (`keymap.rs`); chiqish Ctrl+Alt+Q. Windows/Alt+Tab kabi tizim tugmalari hali ushlanmaydi
+- [x] Koordinata kadr bo'yicha 0..65535 (nisbiy) yuboriladi, letterbox hisobga olinadi
+- [x] Host'da RemoteDesktop portali orqali bajarish (notify_pointer_motion_absolute/button/axis, keyboard_keycode). Sinov kutilmoqda
+- [x] Masshtabli ekranlarda koordinata: Windows 125% (DPI-aware, Win32 o'lchamlari) va Ubuntu 133% (GNOME mutlaq koordinatani logik oraliqda qabul qilib masshtabga bo'ladi: mutlaq + nisbiy gibrid) sinovdan o'tdi. Ko'p monitor hali sinalmagan
 - [ ] Kursor ko'rinishini uzatish
 - [ ] Test: Windows'dan Ubuntu'ni boshqarish, input kechikishi o'lchovi
 
@@ -141,8 +141,8 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Host routerida UDP port forwarding (Linux Host uchun yo'riqnoma)
 - [ ] Ubuntu firewall (ufw) qoidasi
 - [x] IP statik (Q5), DDNS kerak emas
-- [~] Ubuntu qarovsiz ishlash sozlamalari: `scripts/ubuntu-host-setup.sh` yozildi (qulf, ekran o'chishi, uyqu). Avtomatik kirish (auto-login) qo'lda: Settings > Users > Automatic Login
-- [ ] Dastur avtostarti (systemd user service), xato bo'lsa qayta ishga tushirish
+- [~] Ubuntu qarovsiz ishlash sozlamalari: `scripts/ubuntu-host-setup.sh` (qulf, ekran o'chishi, uyqu); avtomatik kirish `scripts/install-host.sh --autologin` (GDM custom.conf). Qayta yuklash sinovi kutilmoqda
+- [~] Dastur avtostarti: `scripts/install-host.sh` release build, `~/.local/bin/remote-desktop-host`, systemd user service (graphical-session.target, Restart=always). Sinov kutilmoqda
 - [ ] Parol kuchliligi talabi, parol xesh ko'rinishida saqlanadi
 - [ ] Ixtiyoriy IP ruxsat ro'yxati (allowlist)
 - [ ] Test: haqiqiy internet orqali boshqa tarmoqdan ulanish
@@ -202,3 +202,5 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-29 | Video yuborish tarmoq orqali muvaffaqiyatli sinaldi (30.3 FPS, 3.3 Mbit/s, 262 ms). Bosqich 3 boshlandi: VideoRequest ga `max_height` qo'shildi, Viewer'ga `--view` (dekodlash + oyna) yozildi, build kutilmoqda |
 | 2026-10-30 | Video nisbati to'g'rilandi (Host kenglikni hisoblaydi), box-filter masshtab. Kiritish (sichqoncha/klaviatura) protokoli, Host portali va Viewer ulandi, build/sinov kutilmoqda. Yozuv aniqligi (zoom/pan, kodlagich sozlamasi) keyinga qoldirildi |
 | 2026-10-30 | Sichqoncha masshtab xatosi topildi: Ubuntu 133% (logik vs fizik, x0.75) va Windows 125% (DPI, x1.25). Ikkalasi tuzatildi, sinov kutilmoqda |
+| 2026-10-30 | Windows -> Ubuntu boshqaruv ishladi: ekran to'liq, sichqoncha (to'rt burchak) va klaviatura normal. Autopush (Windows) va autopull (Ubuntu) skriptlari qo'shildi |
+| 2026-10-30 | Bosqich 6 boshlandi: `install-host.sh` (release, parol, GNOME sozlamalari, systemd user service, --autologin) yozildi; `autopull.sh` service rejimini qo'llaydi |
