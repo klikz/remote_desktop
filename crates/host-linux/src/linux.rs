@@ -156,8 +156,8 @@ async fn start_video(
         if max_height == 0 { "asl".to_string() } else { max_height.to_string() },
         cap.encoder
     );
-    // Sichqoncha koordinatalari oqimning haqiqiy piksel fazosida bo'lishi kerak (GNOME masshtabida
-    // logik o'lchamdan katta). Caps kelishilgach portalga aytamiz.
+    // GNOME (Mutter) sichqoncha koordinatasini portal bergan LOGIK o'lchamda kutadi (sinovda tasdiqlandi:
+    // 133% masshtabda 2880x1620, kadr esa 3840x2160). Haqiqiy kadr o'lchami faqat logga yoziladi.
     {
         let size = cap.source_size.clone();
         let portal = portal.clone();
@@ -165,8 +165,8 @@ async fn start_video(
             for _ in 0..100 {
                 let got = *size.lock().unwrap();
                 if let Some((w, h)) = got {
-                    println!("[host] manba kadr: {w}x{h} (logik {width}x{height})");
-                    portal.set_pointer_space(w, h).await;
+                    println!("[host] manba kadr: {w}x{h} (sichqoncha fazosi logik {width}x{height})");
+                    let _ = &portal;
                     return;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;

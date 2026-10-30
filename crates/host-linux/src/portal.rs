@@ -62,7 +62,8 @@ impl PortalHandle {
         }
     }
 
-    /// Sichqoncha koordinatalari fazosini (oqimning haqiqiy piksel o'lchami) belgilaydi.
+    /// Sichqoncha koordinatalari fazosini qo'lda belgilaydi (boshqa kompozitorlar uchun zaxira).
+    #[allow(dead_code)]
     pub async fn set_pointer_space(&self, w: i32, h: i32) {
         let _ = self.tx.send(Cmd::SetSpace(w, h)).await;
     }

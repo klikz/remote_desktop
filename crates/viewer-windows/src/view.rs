@@ -136,14 +136,15 @@ pub async fn run(session: &mut Session, fps: u16, kbps: u32, max_height: u16, mo
         let (mut frames, mut bytes) = (0u64, 0u64);
         let mut last = Instant::now();
         while !recv_stop.load(Ordering::Relaxed) {
-            let frame = match tokio::time::timeout(Duration::from_millis(250), stream.next_frame()).await {
-                Err(_) => continue,
-                Ok(Ok(Some(f))) => f,
-                Ok(Ok(None)) => {
+            // Diqqat: next_frame() ni timeout bilan uzib bo'lmaydi - yarim o'qilgan kadr oqimni buzadi.
+            // To'xtatish kerak bo'lsa vazifa butunlay abort qilinadi.
+            let frame = match stream.next_frame().await {
+                Ok(Some(f)) => f,
+                Ok(None) => {
                     println!("Host video oqimini tugatdi.");
                     break;
                 }
-                Ok(Err(e)) => {
+                Err(e) => {
                     eprintln!("video xatosi: {e:#}");
                     break;
                 }
@@ -201,6 +202,7 @@ pub async fn run(session: &mut Session, fps: u16, kbps: u32, max_height: u16, mo
         Err(_) => eprintln!("oyna oqimi to'xtadi"),
         _ => {}
     }
+    recv_task.abort();
     let _ = recv_task.await;
     let _ = decoder_thread.join();
     Ok(())
