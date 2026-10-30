@@ -6,7 +6,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use protocol::{DEFAULT_PORT, SERVER_NAME};
 use std::{
     collections::{HashMap, HashSet},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::{mpsc as std_mpsc, Arc, Mutex},
     time::Duration,
@@ -261,7 +261,7 @@ async fn session(
     });
 
     let mut connects: HashMap<String, oneshot::Sender<Result<Relayed, String>>> = HashMap::new();
-    let mut pending_in: HashSet<String> = HashSet::new();
+    let mut pending_in: HashMap<String, String> = HashMap::new();
     let exit = loop {
         tokio::select! {
             m = in_rx.recv() => {
@@ -276,9 +276,9 @@ async fn session(
                             (p.unattended || p.trusted.contains(&from), p.unattended)
                         };
                         if auto {
-                            accept(&conn, &mut send, &sid, !unattended, cfg.host_port).await?;
+                            accept(&conn, &mut send, &sid, &from, !unattended, cfg.host_port).await?;
                         } else {
-                            pending_in.insert(sid.clone());
+                            pending_in.insert(sid.clone(), from.clone());
                             let _ = ev.send(AgentEvent::Incoming { sid, from, name });
                         }
                     }
@@ -304,9 +304,9 @@ async fn session(
                     write_msg(&mut send, &RMsg::Sub(v)).await?;
                 }
                 Some(Cmd::Reply { sid, accept: yes }) => {
-                    if pending_in.remove(&sid) {
+                    if let Some(from) = pending_in.remove(&sid) {
                         if yes {
-                            accept(&conn, &mut send, &sid, true, cfg.host_port).await?;
+                            accept(&conn, &mut send, &sid, &from, true, cfg.host_port).await?;
                         } else {
                             write_msg(&mut send, &RMsg::Reply { sid, accept: false, pw: None }).await?;
                         }
@@ -334,6 +334,7 @@ async fn accept(
     conn: &quinn::Connection,
     send: &mut quinn::SendStream,
     sid: &str,
+    from: &str,
     one_time: bool,
     host_port: Option<u16>,
 ) -> Result<()> {
@@ -353,9 +354,9 @@ async fn accept(
         None
     };
     write_msg(send, &RMsg::Reply { sid: sid.to_string(), accept: true, pw }).await?;
-    let (conn, sid) = (conn.clone(), sid.to_string());
+    let (conn, sid, from) = (conn.clone(), sid.to_string(), from.to_string());
     tokio::spawn(async move {
-        if let Err(e) = open_host_side(&conn, &sid, host_port).await {
+        if let Err(e) = open_host_side(&conn, &sid, &from, host_port).await {
             eprintln!("[agent] ma'lumot oqimi ochilmadi: {e:#}");
         }
     });
@@ -363,10 +364,15 @@ async fn accept(
 }
 
 /// Qabul qiluvchi tomon: oqim mahalliy Host'ning UDP portiga yo'naltiriladi (TCP tunnel serveri kabi).
-async fn open_host_side(conn: &quinn::Connection, sid: &str, host_port: Option<u16>) -> Result<()> {
+async fn open_host_side(conn: &quinn::Connection, sid: &str, from: &str, host_port: Option<u16>) -> Result<()> {
     let (mut s, r) = conn.open_bi().await.context("oqim ochilmadi")?;
     write_msg(&mut s, &RMsg::Data { sid: sid.to_string() }).await?;
-    let udp = UdpSocket::bind("127.0.0.1:0").await.context("lokal UDP port ochilmadi")?;
+    // Host manba manzilni ko'radi: har bir masofaviy ID o'z loopback manzilidan keladi (brute-force cheklovi ID bo'yicha)
+    let lo = IpAddr::V4(tcp_tunnel::loopback_for_key(from));
+    let udp = match UdpSocket::bind(SocketAddr::new(lo, 0)).await {
+        Ok(s) => s,
+        Err(_) => UdpSocket::bind("127.0.0.1:0").await.context("lokal UDP port ochilmadi")?,
+    };
     let port = host_port.or_else(paths::read_host_port).unwrap_or(DEFAULT_PORT);
     tcp_tunnel::pump_io(r, s, udp, Some(SocketAddr::from(([127, 0, 0, 1], port))), false).await;
     Ok(())

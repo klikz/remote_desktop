@@ -51,6 +51,14 @@ pub fn resolve(peer: IpAddr) -> (IpAddr, bool) {
     }
 }
 
+/// Relay: har bir masofaviy client ID uchun doimiy `127.x.y.z` manzil (Host chastota cheklovi ID bo'yicha ishlashi uchun).
+pub(crate) fn loopback_for_key(key: &str) -> Ipv4Addr {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut h);
+    let v = h.finish();
+    Ipv4Addr::new(127, ((v >> 8) & 0xff) as u8, ((v >> 16) & 0xff) as u8, 2 + ((v >> 24) % 252) as u8)
+}
+
 fn loopback_for(real: IpAddr) -> Ipv4Addr {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     real.hash(&mut h);
