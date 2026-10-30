@@ -422,12 +422,25 @@ async fn handle_data(st: &St, cid: &str, send: quinn::SendStream, mut recv: quin
     else {
         bail!("DATA kutilgan edi");
     };
-    {
-        let s = lock(&st.sessions);
-        let x = s.get(&sid).context("sessiya topilmadi")?;
-        if !x.accepted || (x.a != cid && x.b != cid) {
+    // Qabul qiluvchi `Reply` ni control oqimida, ma'lumot oqimini esa darhol keyin yuboradi: ular boshqa
+    // oqimlar bo'lgani uchun tartibi kafolatlanmagan, shuning uchun ruxsat belgisi biroz kutiladi.
+    let mut waited = 0;
+    loop {
+        {
+            let s = lock(&st.sessions);
+            let x = s.get(&sid).context("sessiya topilmadi")?;
+            if x.a != cid && x.b != cid {
+                bail!("sessiyaga ruxsat yo'q");
+            }
+            if x.accepted {
+                break;
+            }
+        }
+        waited += 1;
+        if waited > 100 {
             bail!("sessiyaga ruxsat yo'q");
         }
+        sleep(Duration::from_millis(30)).await;
     }
     let mine = tokio::io::join(recv, send);
     let rx = {
