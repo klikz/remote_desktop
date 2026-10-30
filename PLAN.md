@@ -141,8 +141,8 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Host routerida UDP port forwarding (Linux Host uchun yo'riqnoma)
 - [ ] Ubuntu firewall (ufw) qoidasi
 - [x] IP statik (Q5), DDNS kerak emas
-- [~] Ubuntu qarovsiz ishlash sozlamalari: `scripts/ubuntu-host-setup.sh` (qulf, ekran o'chishi, uyqu); avtomatik kirish `scripts/install-host.sh --autologin` (GDM custom.conf). Qayta yuklash sinovi kutilmoqda
-- [~] Dastur avtostarti: `scripts/install-host.sh` release build, `~/.local/bin/remote-desktop-host`, systemd user service (graphical-session.target, Restart=always). Sinov kutilmoqda
+- [x] Ubuntu qarovsiz ishlash sozlamalari: `scripts/ubuntu-host-setup.sh` (qulf, ekran o'chishi, uyqu); avtomatik kirish `scripts/install-host.sh --autologin` (GDM custom.conf). Qayta yuklashdan keyin sinaldi
+- [x] Dastur avtostarti: `scripts/install-host.sh` release build, `~/.local/bin/remote-desktop-host`, systemd user service (graphical-session.target, Restart=always). Qayta yuklashdan keyin o'zi ishga tushdi
 - [ ] Parol kuchliligi talabi, parol xesh ko'rinishida saqlanadi
 - [ ] Ixtiyoriy IP ruxsat ro'yxati (allowlist)
 - [ ] Test: haqiqiy internet orqali boshqa tarmoqdan ulanish
@@ -150,9 +150,9 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 ### Bosqich 7. UI va tayyorlash
 - [ ] Host UI (Linux): IP, port, parol, ulanish holati, uzish tugmasi
 - [ ] Host'da ulanish tasdig'i va doimiy indikator
-- [ ] Viewer UI (Windows): manzil kiritish, saqlangan Host'lar, sozlamalar paneli
+- [~] Viewer UI (Windows, egui): ulanish oynasi, saqlangan Host'lar (`hosts.txt`, parolsiz), sifat shablonlari, fingerprint tasdig'i oynasi, ulanish paneli (FPS/bitrate/RTT, to'liq ekran, boshqaruv, uzish). Build va sinov kutilmoqda
 - [ ] Windows: portable `.exe` va installer
-- [ ] Linux: AppImage yoki `.deb`, avtostart (systemd user service)
+- [~] Linux: avtostart (systemd user service) tayyor (`install-host.sh`); AppImage/.deb hali yo'q
 - [ ] Ixtiyoriy: clipboard sinxronizatsiyasi
 
 ### Bosqich 8. Keyinroq (ixtiyoriy, hozirgi reja doirasida emas)
@@ -204,3 +204,5 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-30 | Sichqoncha masshtab xatosi topildi: Ubuntu 133% (logik vs fizik, x0.75) va Windows 125% (DPI, x1.25). Ikkalasi tuzatildi, sinov kutilmoqda |
 | 2026-10-30 | Windows -> Ubuntu boshqaruv ishladi: ekran to'liq, sichqoncha (to'rt burchak) va klaviatura normal. Autopush (Windows) va autopull (Ubuntu) skriptlari qo'shildi |
 | 2026-10-30 | Bosqich 6 boshlandi: `install-host.sh` (release, parol, GNOME sozlamalari, systemd user service, --autologin) yozildi; `autopull.sh` service rejimini qo'llaydi |
+| 2026-10-30 | Qarovsiz Host sinovi o'tdi: reboot -> avto-login -> service o'zi ishga tushdi -> Windows'dan LAN orqali ulanish va boshqaruv ishladi. Keyingi: internet (port forwarding) |
+| 2026-10-30 | Viewer GUI (egui/eframe 0.29) yozildi: argumentsiz ishga tushirilsa oyna ochiladi, `connect` CLI saqlandi. Build kutilmoqda |

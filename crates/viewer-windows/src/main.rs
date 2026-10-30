@@ -1,6 +1,7 @@
 //! Viewer (Windows). Hozircha: ulanish, autentifikatsiya, ping va video oqimini qabul qilish.
 //! `--view` bilan H.264 ni dekodlab oynada ko'rsatadi.
 
+mod gui;
 mod keymap;
 mod view;
 
@@ -23,6 +24,7 @@ const USAGE: &str = "\
 viewer-windows: Remote Desktop Viewer
 
 Foydalanish:
+  viewer-windows                       oynali interfeys (tavsiya etiladi)
   viewer-windows connect <manzil[:port]> [--view] [--video SEKUND] [--fps N] [--kbps N] [--height N] [--monitor N] [--no-input] [--out FAYL.h264]
 
 Misollar:
@@ -45,9 +47,19 @@ struct Options {
     out: Option<PathBuf>,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Argumentsiz: oynali interfeys. `connect ...`: buyruq qatori (sinov va diagnostika uchun).
+    if args.is_empty() {
+        return gui::run();
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(cli_main(args))
+}
+
+async fn cli_main(args: Vec<String>) -> Result<()> {
     match (args.first().map(String::as_str), args.get(1)) {
         (Some("connect"), Some(target)) => {
             let mut opts = Options { video_secs: 0, fps: 30, kbps: 10000, max_height: 1080, monitor: 0, input: true, view: false, out: None };
