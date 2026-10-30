@@ -9,16 +9,22 @@
 
 VIEWER := target/release/viewer
 
+# apt dagi cargo eski (Cargo.lock v4 ni o'qiy olmaydi): rustup dagi yangi Rust ishlatiladi
+export PATH := $(HOME)/.cargo/bin:$(PATH)
+
 MSG ?= .
 
-.PHONY: all update build run push clean
+.PHONY: all update toolchain build run push clean
 
 all: update build run
 
 update:
 	git pull --ff-only
 
-build:
+toolchain:
+	@test -x $(HOME)/.cargo/bin/cargo || { echo "rustup o'rnatilmoqda..."; curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal; }
+
+build: toolchain
 	bash scripts/build-viewer.sh
 
 run: build
