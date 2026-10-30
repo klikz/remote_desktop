@@ -1,9 +1,6 @@
-//! Viewer (Windows). Hozircha: ulanish, autentifikatsiya, ping va video oqimini qabul qilish.
-//! `--view` bilan H.264 ni dekodlab oynada ko'rsatadi.
+//! Viewer (Windows va Linux). Argumentsiz: oynali interfeys. `connect ...`: buyruq qatori (sinov uchun).
 
 mod gui;
-mod keymap;
-mod view;
 
 use anyhow::{bail, Context, Result};
 use protocol::DEFAULT_PORT;
@@ -21,19 +18,16 @@ use std::{
 };
 
 const USAGE: &str = "\
-viewer-windows: Remote Desktop Viewer
+viewer: Remote Desktop Viewer
 
 Foydalanish:
-  viewer-windows                       oynali interfeys (tavsiya etiladi)
-  viewer-windows connect <manzil[:port]> [--view] [--video SEKUND] [--fps N] [--kbps N] [--height N] [--monitor N] [--no-input] [--out FAYL.h264]
+  viewer                               oynali interfeys (tavsiya etiladi)
+  viewer connect <manzil[:port]> [--video SEKUND] [--fps N] [--kbps N] [--height N] [--monitor N] [--out FAYL.h264]
 
-Misollar:
-  viewer-windows connect 192.168.2.226                 ulanish va ping sinovi
-  viewer-windows connect 192.168.2.226 --view          videoni oynada ko'rsatish (chiqish: oynani yoping yoki Ctrl+Alt+Q)
-  viewer-windows connect 192.168.2.226 --view --monitor 1   (0 = birinchi monitor, Host logida ro'yxat)
-  viewer-windows connect 192.168.2.226 --view --height 720 --fps 30 --kbps 3000
-  viewer-windows connect 192.168.2.226 --video 10      10 soniya video qabul qilib statistika chiqarish
-  viewer-windows connect 192.168.2.226 --video 10 --out test.h264
+Buyruq qatori sinov uchun:
+  viewer connect 192.168.2.226                 ulanish va ping sinovi
+  viewer connect 192.168.2.226 --video 10      10 soniya video qabul qilib statistika chiqarish
+  viewer connect 192.168.2.226 --video 10 --out test.h264
 ";
 
 struct Options {
@@ -42,8 +36,6 @@ struct Options {
     kbps: u32,
     max_height: u16,
     monitor: u8,
-    input: bool,
-    view: bool,
     out: Option<PathBuf>,
 }
 
@@ -62,7 +54,7 @@ fn main() -> Result<()> {
 async fn cli_main(args: Vec<String>) -> Result<()> {
     match (args.first().map(String::as_str), args.get(1)) {
         (Some("connect"), Some(target)) => {
-            let mut opts = Options { video_secs: 0, fps: 30, kbps: 10000, max_height: 1080, monitor: 0, input: true, view: false, out: None };
+            let mut opts = Options { video_secs: 0, fps: 30, kbps: 10000, max_height: 1080, monitor: 0, out: None };
             let mut it = args[2..].iter();
             while let Some(a) = it.next() {
                 match a.as_str() {
@@ -71,8 +63,6 @@ async fn cli_main(args: Vec<String>) -> Result<()> {
                     "--kbps" => opts.kbps = it.next().context("--kbps uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
                     "--height" => opts.max_height = it.next().context("--height uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
                     "--monitor" => opts.monitor = it.next().context("--monitor uchun qiymat kerak")?.parse().context("noto'g'ri son")?,
-                    "--no-input" => opts.input = false,
-                    "--view" => opts.view = true,
                     "--out" => opts.out = Some(PathBuf::from(it.next().context("--out uchun yo'l kerak")?)),
                     other => bail!("noma'lum argument: {other}\n\n{USAGE}"),
                 }
@@ -137,9 +127,7 @@ async fn run_connect(target: &str, opts: Options) -> Result<()> {
     .await?;
     println!("Ulandi. Host imkoniyatlari: {:?}", session.host_caps);
 
-    if opts.view {
-        view::run(&mut session, opts.fps, opts.kbps, opts.max_height, opts.monitor, opts.input).await?;
-    } else if opts.video_secs > 0 {
+    if opts.video_secs > 0 {
         receive_video(&mut session, &opts).await?;
     } else {
         for i in 1..=5 {

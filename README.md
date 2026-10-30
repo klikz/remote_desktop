@@ -9,7 +9,7 @@ Cross-platform remote desktop. Reja va holat: [PLAN.md](PLAN.md).
 | `crates/protocol` | Xabarlar, versiya, konstantalar (ikkala tomon uchun umumiy) |
 | `crates/rdcore` | Transport (QUIC), autentifikatsiya, umumiy mantiq |
 | `crates/host-linux` | Host: Ubuntu (Wayland), ekran olish va kiritishni bajarish |
-| `crates/viewer-windows` | Viewer: Windows, ko'rsatish va kiritishni yuborish |
+| `crates/viewer` | Viewer (Windows va Linux): oynali interfeys, ko'rsatish va kiritishni yuborish |
 
 ## Build
 
@@ -24,7 +24,7 @@ Rust (stable) kerak: https://rustup.rs
 2. Qo'lda sinash:
    - Ubuntu: `cargo run -p host-linux -- set-password`, keyin `cargo run -p host-linux -- run`
      (fingerprint ekranga chiqadi; Ubuntu firewall'da bo'lsa: `sudo ufw allow 7777/udp`)
-   - Windows: `cargo run -p viewer-windows -- connect <Ubuntu IP>`
+   - Windows: `cargo run -p viewer` (oynali) yoki `cargo run -p viewer -- connect <Ubuntu IP>`
      (birinchi marta fingerprint'ni Host ekranidagi bilan solishtirib `yes` deng)
 
 ## Bosqich 2 sinovi (Ubuntu Host: portal va ekran olish)
@@ -48,5 +48,5 @@ Majburiy kodlagich: `RD_ENCODER=x264enc cargo run ...`
 GStreamer dev paketlari o'rnatilgan bo'lishi kerak (yuqorida). Endi `host-linux` ham GStreamer'ga bog'liq, shuning uchun Ubuntu'da `cargo test --workspace` uchun ham ular kerak.
 
 1. Ubuntu: `cargo run -p host-linux -- run` (birinchi marta GNOME ruxsat dialogi chiqadi)
-2. Windows: `cargo run -p viewer-windows -- connect <Ubuntu IP> --video 10 --out test.h264`
+2. Windows: `cargo run -p viewer -- connect <Ubuntu IP> --video 10 --out test.h264`
 3. Statistika chiqadi. `test.h264` ni VLC bilan oching.

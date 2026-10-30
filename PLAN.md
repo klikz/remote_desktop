@@ -150,14 +150,14 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 ### Bosqich 7. UI va tayyorlash
 - [ ] Host UI (Linux): IP, port, parol, ulanish holati, uzish tugmasi
 - [ ] Host'da ulanish tasdig'i va doimiy indikator
-- [~] Viewer UI (Windows, egui): ulanish oynasi, saqlangan Host'lar (`hosts.txt`, parolsiz), sifat shablonlari, fingerprint tasdig'i oynasi, ulanish paneli (FPS/bitrate/RTT, to'liq ekran, boshqaruv, uzish). Build va sinov kutilmoqda
+- [x] Viewer UI (Windows, egui): ulanish oynasi, saqlangan Host'lar (`hosts.txt`, parolsiz), sifat shablonlari, fingerprint tasdig'i oynasi, ulanish paneli (FPS/bitrate/RTT, to'liq ekran, boshqaruv, uzish). Sinovdan o'tdi
 - [ ] Windows: portable `.exe` va installer
 - [~] Linux: avtostart (systemd user service) tayyor (`install-host.sh`); AppImage/.deb hali yo'q
 - [ ] Ixtiyoriy: clipboard sinxronizatsiyasi
 
 ### Bosqich 8. Keyinroq (ixtiyoriy, hozirgi reja doirasida emas)
 - [ ] Windows Host (DXGI + SendInput)
-- [ ] Linux Viewer
+- [~] Linux Viewer: crate `viewer-windows` -> `viewer` (Windows va Linux uchun bitta kod, minifb olib tashlandi, faqat egui). Ubuntu'da build va sinov kutilmoqda (`scripts/build-viewer.sh`)
 - [ ] Windows xizmati (UAC va login ekrani uchun)
 - [ ] Relay (agar oq IP bo'lmagan holat chiqsa)
 
@@ -206,3 +206,5 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-30 | Bosqich 6 boshlandi: `install-host.sh` (release, parol, GNOME sozlamalari, systemd user service, --autologin) yozildi; `autopull.sh` service rejimini qo'llaydi |
 | 2026-10-30 | Qarovsiz Host sinovi o'tdi: reboot -> avto-login -> service o'zi ishga tushdi -> Windows'dan LAN orqali ulanish va boshqaruv ishladi. Keyingi: internet (port forwarding) |
 | 2026-10-30 | Viewer GUI (egui/eframe 0.29) yozildi: argumentsiz ishga tushirilsa oyna ochiladi, `connect` CLI saqlandi. Build kutilmoqda |
+| 2026-10-30 | Viewer GUI sinovdan o'tdi: ro'yxatdan ulanish, to'liq ekran, boshqaruv, o'zbekcha belgilar ishladi |
+| 2026-10-30 | Linux Viewer boshlandi: `crates/viewer-windows` `crates/viewer` ga o'zgartirildi, eski minifb rejimi (`--view`) olib tashlandi, GUI yagona yo'l. Buyruq: `cargo run -p viewer` |

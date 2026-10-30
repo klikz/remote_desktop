@@ -4,7 +4,7 @@ members = [
     "crates/protocol",
     "crates/rdcore",
     "crates/host-linux",
-    "crates/viewer-windows",
+    "crates/viewer",
     "crates/portal-probe",
 ]
 
@@ -23,5 +23,5 @@ strip = true
 opt-level = 2
 
 # Viewer'ning o'z piksel sikllari dev rejimida ham tez ishlashi uchun
-[profile.dev.package.viewer-windows]
+[profile.dev.package.viewer]
 opt-level = 2

@@ -1,5 +1,5 @@
 [package]
-name = "viewer-windows"
+name = "viewer"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -11,9 +11,6 @@ anyhow = "1"
 rpassword = "7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
 openh264 = "0.6"
-minifb = "0.27"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 egui = "0.29"
 
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }
