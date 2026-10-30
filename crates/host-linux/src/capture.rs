@@ -57,6 +57,18 @@ fn encoder_desc(factory: &str, kbps: u32, gop: u32) -> String {
     if extra.trim().is_empty() { base } else { format!("{base} {extra}") }
 }
 
+/// Matn aniqligi uchun qo'shimcha kodlagich sozlamalari, afzalligi bo'yicha. Sozlama shu GStreamer
+/// versiyasida bo'lmasa, keyingisi sinaladi; oxirgisi bo'sh (asosiy sozlamalar).
+/// `RD_ENC_OPTS` berilgan bo'lsa, ular ishlatiladi va bu ro'yxat qo'llanmaydi.
+fn quality_candidates(factory: &str) -> Vec<&'static str> {
+    match factory {
+        "nvh264enc" => vec!["preset=p5 tune=low-latency", "preset=p4", ""],
+        "vah264enc" => vec!["target-usage=2", ""],
+        "x264enc" => vec!["speed-preset=superfast", ""],
+        _ => vec![""],
+    }
+}
+
 fn encoder_base(factory: &str, kbps: u32, gop: u32) -> String {
     match factory {
         "vah264enc" => format!("vah264enc bitrate={kbps} key-int-max={gop}"),
@@ -107,20 +119,44 @@ pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32, max_height: u32, sr
     } else {
         String::new()
     };
-    let desc = format!(
-        "pipewiresrc name=src fd={} path={} do-timestamp=true ! videoconvert ! videoscale ! videorate ! \
-         video/x-raw,framerate={}/1{} ! {} ! video/x-h264,stream-format=byte-stream,alignment=au ! \
-         appsink name=sink sync=false max-buffers=4 drop=true",
-        fd.as_raw_fd(),
-        node_id,
-        fps,
-        height_caps,
-        encoder_desc(encoder, kbps, gop)
-    );
-
-    let pipeline = gst::parse::launch(&desc)
-        .context("pipeline yaratilmadi")
-        .map_err(|e| fail(video_reason::NO_CAPTURE, e))?
+    let build = |enc: &str| {
+        format!(
+            "pipewiresrc name=src fd={} path={} do-timestamp=true ! videoconvert ! videoscale ! videorate ! \
+             video/x-raw,framerate={}/1{} ! {} ! video/x-h264,stream-format=byte-stream,alignment=au ! \
+             appsink name=sink sync=false max-buffers=4 drop=true",
+            fd.as_raw_fd(),
+            node_id,
+            fps,
+            height_caps,
+            enc
+        )
+    };
+    let user_opts = std::env::var("RD_ENC_OPTS").map_or(false, |s| !s.trim().is_empty());
+    let candidates = if user_opts { vec![""] } else { quality_candidates(encoder) };
+    let mut launched: Option<gst::Element> = None;
+    let mut last_err: Option<String> = None;
+    for extra in candidates {
+        let enc = format!("{} {extra}", encoder_desc(encoder, kbps, gop));
+        // Sifat sozlamasi yaroqsiz bo'lsa (xato bo'lishi shart), keyingi variantga o'tiladi.
+        let flags = if extra.is_empty() { gst::ParseFlags::empty() } else { gst::ParseFlags::FATAL_ERRORS };
+        match gst::parse::launch_full(&build(&enc), None, flags) {
+            Ok(p) => {
+                if !extra.is_empty() {
+                    eprintln!("[host] kodlagich sozlamasi: {encoder} {extra}");
+                }
+                launched = Some(p);
+                break;
+            }
+            Err(e) => last_err = Some(e.to_string()),
+        }
+    }
+    let pipeline = launched
+        .ok_or_else(|| {
+            fail(
+                video_reason::NO_CAPTURE,
+                anyhow!("pipeline yaratilmadi: {}", last_err.unwrap_or_default()),
+            )
+        })?
         .downcast::<gst::Pipeline>()
         .map_err(|_| fail(video_reason::NO_CAPTURE, anyhow!("pipeline turi noto'g'ri")))?;
     let sink = pipeline

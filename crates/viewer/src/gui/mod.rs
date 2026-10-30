@@ -30,11 +30,12 @@ pub fn run() -> anyhow::Result<()> {
 }
 
 /// Sifat shablonlari: (nom, fps, kbps, balandlik; 0 = asl o'lcham)
-const PRESETS: [(&str, u16, u32, u16); 4] = [
+const PRESETS: [(&str, u16, u32, u16); 5] = [
     ("Past (720p, 15 FPS)", 15, 2500, 720),
     ("O'rta (1080p, 30 FPS)", 30, 8000, 1080),
     ("Yuqori (1080p, 30 FPS)", 30, 15000, 1080),
-    ("Maksimal (asl o'lcham)", 30, 25000, 0),
+    ("Matn uchun (1440p, 20 FPS)", 20, 20_000, 1440),
+    ("Maksimal (asl o'lcham)", 30, 40_000, 0),
 ];
 const HEIGHTS: [(u16, &str); 5] = [(720, "720p"), (1080, "1080p"), (1440, "1440p"), (2160, "2160p"), (0, "Asl o'lcham")];
 
