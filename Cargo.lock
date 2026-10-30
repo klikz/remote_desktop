@@ -3734,6 +3734,7 @@ dependencies = [
  "anyhow",
  "eframe",
  "egui",
+ "host-windows",
  "openh264",
  "protocol",
  "rdcore",
