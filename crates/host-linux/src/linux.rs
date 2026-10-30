@@ -117,6 +117,7 @@ async fn session(mut io: SessionIo, portal: PortalHandle) {
                     break;
                 }
             }
+            Ok(Message::Input(ev)) => portal.input(ev).await,
             Ok(Message::Bye { .. }) | Err(_) => break,
             Ok(_) => {}
         }

@@ -119,6 +119,19 @@ pub struct MonitorInfo {
     pub primary: bool,
 }
 
+/// Viewer -> Host: sichqoncha va klaviatura hodisalari.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputEvent {
+    /// Ko'rsatkich o'rni: 0..=65535 (video kadrining chap-yuqorisidan o'ng-pastigacha).
+    PointerMove { x: u16, y: u16 },
+    /// Tugma: 0 = chap, 1 = o'ng, 2 = o'rta.
+    Button { button: u8, pressed: bool },
+    /// G'ildirak qadamlari (musbat = pastga/o'ngga).
+    Scroll { dx: i16, dy: i16 },
+    /// Klavish: Linux evdev kodi (jismoniy klavish).
+    Key { code: u32, pressed: bool },
+}
+
 /// Host e'lon qiladigan imkoniyatlar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capabilities {
@@ -154,6 +167,8 @@ pub enum Message {
     VideoStarted { codec: u8, fps: u16, kbps: u32 },
     /// Host -> Viewer: videoni boshlab bo'lmadi (`video_reason`).
     VideoFailed { reason: u8 },
+    /// Viewer -> Host: kiritish hodisasi.
+    Input(InputEvent),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +208,7 @@ const TAG_BYE: u8 = 8;
 const TAG_VIDEO_REQUEST: u8 = 9;
 const TAG_VIDEO_STARTED: u8 = 10;
 const TAG_VIDEO_FAILED: u8 = 11;
+const TAG_INPUT: u8 = 12;
 
 struct Reader<'a> {
     buf: &'a [u8],
@@ -327,6 +343,31 @@ impl Message {
                 out.push(TAG_VIDEO_FAILED);
                 out.push(*reason);
             }
+            Message::Input(ev) => {
+                out.push(TAG_INPUT);
+                match ev {
+                    InputEvent::PointerMove { x, y } => {
+                        out.push(1);
+                        out.extend_from_slice(&x.to_be_bytes());
+                        out.extend_from_slice(&y.to_be_bytes());
+                    }
+                    InputEvent::Button { button, pressed } => {
+                        out.push(2);
+                        out.push(*button);
+                        out.push(u8::from(*pressed));
+                    }
+                    InputEvent::Scroll { dx, dy } => {
+                        out.push(3);
+                        out.extend_from_slice(&dx.to_be_bytes());
+                        out.extend_from_slice(&dy.to_be_bytes());
+                    }
+                    InputEvent::Key { code, pressed } => {
+                        out.push(4);
+                        out.extend_from_slice(&code.to_be_bytes());
+                        out.push(u8::from(*pressed));
+                    }
+                }
+            }
         }
         out
     }
@@ -389,6 +430,13 @@ impl Message {
                 kbps: r.u32()?,
             },
             TAG_VIDEO_FAILED => Message::VideoFailed { reason: r.u8()? },
+            TAG_INPUT => Message::Input(match r.u8()? {
+                1 => InputEvent::PointerMove { x: r.u16()?, y: r.u16()? },
+                2 => InputEvent::Button { button: r.u8()?, pressed: r.u8()? != 0 },
+                3 => InputEvent::Scroll { dx: r.u16()? as i16, dy: r.u16()? as i16 },
+                4 => InputEvent::Key { code: r.u32()?, pressed: r.u8()? != 0 },
+                other => return Err(DecodeError::UnknownTag(other)),
+            }),
             other => return Err(DecodeError::UnknownTag(other)),
         };
         r.finish()?;
@@ -457,6 +505,10 @@ mod tests {
             Message::VideoRequest { fps: 30, kbps: 4000, max_height: 1080, monitor: 1 },
             Message::VideoStarted { codec: CODEC_H264, fps: 60, kbps: u32::MAX },
             Message::VideoFailed { reason: video_reason::NO_CAPTURE },
+            Message::Input(InputEvent::PointerMove { x: 0, y: 65535 }),
+            Message::Input(InputEvent::Button { button: 2, pressed: true }),
+            Message::Input(InputEvent::Scroll { dx: -3, dy: 7 }),
+            Message::Input(InputEvent::Key { code: 30, pressed: false }),
         ]
     }
 

@@ -6,10 +6,11 @@
 
 use anyhow::{anyhow, Context, Result};
 use ashpd::desktop::{
-    remote_desktop::{DeviceType, RemoteDesktop},
+    remote_desktop::{Axis, DeviceType, KeyState, RemoteDesktop},
     screencast::{CursorMode, Screencast, SourceType},
     PersistMode,
 };
+use protocol::InputEvent;
 use std::{os::fd::OwnedFd, path::PathBuf};
 use tokio::sync::{mpsc, oneshot};
 
@@ -35,6 +36,7 @@ struct Mon {
 
 enum Cmd {
     OpenStream(usize, oneshot::Sender<Result<StreamInfo>>),
+    Input(InputEvent),
 }
 
 #[derive(Clone)]
@@ -44,9 +46,19 @@ pub struct PortalHandle {
 
 impl PortalHandle {
     pub fn spawn(token_path: PathBuf) -> Self {
-        let (tx, rx) = mpsc::channel(8);
+        let (tx, rx) = mpsc::channel(512);
         tokio::spawn(portal_task(token_path, rx));
         PortalHandle { tx }
+    }
+
+    /// Kiritish hodisasini portalga uzatadi. Ko'rsatkich harakati zich bo'lgani uchun navbat
+    /// to'lsa tashlab yuboriladi; tugma va klavishlar esa yo'qolmaydi.
+    pub async fn input(&self, ev: InputEvent) {
+        if matches!(ev, InputEvent::PointerMove { .. }) {
+            let _ = self.tx.try_send(Cmd::Input(ev));
+        } else {
+            let _ = self.tx.send(Cmd::Input(ev)).await;
+        }
     }
 
     /// Ekran oqimi uchun PipeWire ulanishini so'raydi (kerak bo'lsa sessiyani ochadi).
@@ -85,6 +97,10 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                 None => return,
             },
         };
+
+        if matches!(first, Cmd::Input(_)) {
+            continue; // sessiya yo'q: kiritish hodisasi e'tiborsiz qoldiriladi
+        }
 
         let setup = async {
             let rd = RemoteDesktop::new()
@@ -148,8 +164,9 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("[portal] sessiyani ochib bo'lmadi: {e:#}");
-                let Cmd::OpenStream(_, reply) = first;
-                let _ = reply.send(Err(e));
+                if let Cmd::OpenStream(_, reply) = first {
+                    let _ = reply.send(Err(e));
+                }
                 continue;
             }
         };
@@ -159,6 +176,7 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
         }
 
         let mut next = Some(first);
+        let mut cur = mons[0];
         loop {
             let cmd = match next.take() {
                 Some(c) => c,
@@ -170,9 +188,43 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                     }
                 },
             };
-            let Cmd::OpenStream(want, reply) = cmd;
+            let (want, reply) = match cmd {
+                Cmd::Input(ev) => {
+                    match ev {
+                        InputEvent::PointerMove { x, y } => {
+                            let px = f64::from(x) / 65535.0 * f64::from(cur.w.max(1));
+                            let py = f64::from(y) / 65535.0 * f64::from(cur.h.max(1));
+                            let _ = rd.notify_pointer_motion_absolute(&session, cur.node_id, px, py).await;
+                        }
+                        InputEvent::Button { button, pressed } => {
+                            let code = match button {
+                                0 => 0x110, // BTN_LEFT
+                                1 => 0x111, // BTN_RIGHT
+                                _ => 0x112, // BTN_MIDDLE
+                            };
+                            let st = if pressed { KeyState::Pressed } else { KeyState::Released };
+                            let _ = rd.notify_pointer_button(&session, code, st).await;
+                        }
+                        InputEvent::Scroll { dx, dy } => {
+                            if dy != 0 {
+                                let _ = rd.notify_pointer_axis_discrete(&session, Axis::Vertical, i32::from(dy)).await;
+                            }
+                            if dx != 0 {
+                                let _ = rd.notify_pointer_axis_discrete(&session, Axis::Horizontal, i32::from(dx)).await;
+                            }
+                        }
+                        InputEvent::Key { code, pressed } => {
+                            let st = if pressed { KeyState::Pressed } else { KeyState::Released };
+                            let _ = rd.notify_keyboard_keycode(&session, code as i32, st).await;
+                        }
+                    }
+                    continue;
+                }
+                Cmd::OpenStream(w, r) => (w, r),
+            };
             let index = want.min(mons.len() - 1);
             let m = mons[index];
+            cur = m;
             match sc.open_pipe_wire_remote(&session).await {
                 Ok(fd) => {
                     let _ = reply.send(Ok(StreamInfo {

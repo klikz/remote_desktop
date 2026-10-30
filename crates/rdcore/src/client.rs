@@ -175,6 +175,12 @@ impl VideoStream {
 }
 
 impl Session {
+    /// Host'ga sichqoncha/klaviatura hodisasini yuboradi.
+    pub async fn send_input(&mut self, ev: protocol::InputEvent) -> Result<()> {
+        write_message(&mut self.send, &Message::Input(ev)).await?;
+        Ok(())
+    }
+
     /// Hostdan videoni boshlashni so'raydi va kadrlar oqimini qaytaradi.
     pub async fn request_video(&mut self, fps: u16, kbps: u32, max_height: u16, monitor: u8) -> Result<VideoStream> {
         write_message(&mut self.send, &Message::VideoRequest { fps, kbps, max_height, monitor }).await?;

@@ -119,10 +119,10 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Test: Windows oynasida Ubuntu ekrani ko'rinadi
 
 ### Bosqich 4. Boshqaruv (sichqoncha va klaviatura)
-- [ ] Viewer'da sichqoncha harakati, bosish, g'ildirakni ushlash
-- [ ] Viewer'da klaviatura hodisalari (scancode va layout masalasi, maxsus tugmalar)
-- [ ] Nisbiy koordinata yuborish
-- [ ] Host'da RemoteDesktop portali orqali sichqoncha va klaviaturani bajarish
+- [~] Viewer'da sichqoncha harakati, bosish, g'ildirakni ushlash (minifb, `InputEvent` protokolda). Build va sinov kutilmoqda
+- [~] Viewer'da klaviatura hodisalari: jismoniy klavish -> evdev kodi (`keymap.rs`); chiqish Ctrl+Alt+Q. Windows/Alt+Tab kabi tizim tugmalari hali ushlanmaydi
+- [~] Koordinata kadr bo'yicha 0..65535 (nisbiy) yuboriladi, letterbox hisobga olinadi
+- [~] Host'da RemoteDesktop portali orqali bajarish (notify_pointer_motion_absolute/button/axis, keyboard_keycode). Sinov kutilmoqda
 - [ ] Ko'p monitorli Host'da koordinatani to'g'ri moslashtirish
 - [ ] Kursor ko'rinishini uzatish
 - [ ] Test: Windows'dan Ubuntu'ni boshqarish, input kechikishi o'lchovi
@@ -200,3 +200,4 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-29 | Q4-Q7 javoblari qo'shildi: Ubuntu 26.04.1, statik IP, qarovsiz ishlash talabi. Bosqich 2 boshiga go/no-go tekshiruv qo'shildi |
 | 2026-10-29 | Q1-Q3 javoblari qo'shildi: Linux (Ubuntu GNOME Wayland) Host, Windows Viewer, oq IP bor. Bosqichlar shunga qayta tartiblandi |
 | 2026-10-29 | Video yuborish tarmoq orqali muvaffaqiyatli sinaldi (30.3 FPS, 3.3 Mbit/s, 262 ms). Bosqich 3 boshlandi: VideoRequest ga `max_height` qo'shildi, Viewer'ga `--view` (dekodlash + oyna) yozildi, build kutilmoqda |
+| 2026-10-30 | Video nisbati to'g'rilandi (Host kenglikni hisoblaydi), box-filter masshtab. Kiritish (sichqoncha/klaviatura) protokoli, Host portali va Viewer ulandi, build/sinov kutilmoqda. Yozuv aniqligi (zoom/pan, kodlagich sozlamasi) keyinga qoldirildi |
