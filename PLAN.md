@@ -148,7 +148,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Test: haqiqiy internet orqali boshqa tarmoqdan ulanish
 
 ### Bosqich 7. UI va tayyorlash
-- [~] Host UI: dasturdagi "Bu kompyuter" bo'limi: holat, manzil, fingerprint, parolni o'rnatish (ko'rsatish, tasodifiy yaratish, xizmatni qayta ishga tushirish). Ulangan Viewer'lar ro'yxati va uzish tugmasi hali yo'q
+- [x] Host UI: "Bu kompyuter" bo'limi: holat, manzil, fingerprint, parol, port. Windows'da Host dastur ichida ishlaydi: "Ulanishga ruxsat berish" tugmasi, ulanganlar ro'yxati + "Uzish", Windows bilan avtostart (build kutilmoqda)
 - [ ] Host'da ulanish tasdig'i va doimiy indikator
 - [x] Viewer UI (Windows, egui): ulanish oynasi, saqlangan Host'lar (`hosts.txt`, parolsiz), sifat shablonlari, fingerprint tasdig'i oynasi, ulanish paneli (FPS/bitrate/RTT, to'liq ekran, boshqaruv, uzish). Sinovdan o'tdi
 - [ ] Windows: portable `.exe` va installer
@@ -211,3 +211,4 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-30 | Viewer parolini ko'rsatish belgisi; "Bu kompyuter" bo'limi (Host holati, manzil, fingerprint, parol o'rnatish) qo'shildi. Build kutilmoqda |
 | 2026-10-30 | Windows Host yozildi (`crates/host-windows`): GDI ekran olish, openh264 kodlash, SendInput. Ubuntu Viewer -> Windows ulanishi uchun. Build kutilmoqda |
 | 2026-10-30 | Ikki tomonlama ulanish ishladi: Windows <-> Ubuntu (Viewer va Host ikkala tizimda). Keyingi: internet ulanishi va Host'ni UI'dan boshqarish |
+| 2026-10-30 | Windows Host dastur ichiga ko'chirildi: `host-windows` kutubxona (`RunningHost`), UI'da yoqish/o'chirish, ulanganlar + uzish, avtostart. Build kutilmoqda |
