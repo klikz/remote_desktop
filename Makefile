@@ -2,7 +2,7 @@
 #   make          yangilash + build + ishga tushirish
 #   make update   faqat git pull
 #   make build    faqat build (pull qilmasdan)
-#   make run      pull qilmasdan, mavjud build ni ishga tushirish
+#   make run      build (o'zgargan bo'lsa) va ishga tushirish, pull qilmasdan
 #   make push     hamma o'zgarishni commit (xabar ".") va push qilish; xabar: make push MSG="matn"
 #   make clean    build fayllarini o'chirish
 #   NO_HOST=1 make   GStreamer dev paketlarisiz (faqat Viewer)
@@ -21,8 +21,8 @@ update:
 build:
 	bash scripts/build-viewer.sh
 
-run:
-	@test -x $(VIEWER) || { echo "$(VIEWER) topilmadi: avval make build"; exit 1; }
+run: build
+	@test -x $(VIEWER) || { echo "$(VIEWER) topilmadi"; exit 1; }
 	$(VIEWER)
 
 push:
