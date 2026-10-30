@@ -156,8 +156,8 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Ixtiyoriy: clipboard sinxronizatsiyasi
 
 ### Bosqich 8. Keyinroq (ixtiyoriy, hozirgi reja doirasida emas)
-- [~] Windows Host (`crates/host-windows`): ekran GDI BitBlt + kursor (DXGI keyinroq), openh264 dasturiy H.264, SendInput orqali sichqoncha/klaviatura. CLI: `host-windows set-password|run`. Build va sinov kutilmoqda. Cheklov: UAC/qulf ekrani ko'rinmaydi, faqat asosiy monitor
-- [~] Linux Viewer: crate `viewer-windows` -> `viewer` (Windows va Linux uchun bitta kod, minifb olib tashlandi, faqat egui). Ubuntu'da build va sinov kutilmoqda (`scripts/build-viewer.sh`)
+- [x] Windows Host (`crates/host-windows`): ekran GDI BitBlt + kursor (DXGI keyinroq), openh264 dasturiy H.264, SendInput orqali sichqoncha/klaviatura. CLI: `host-windows set-password|run`. Ikki tomonlama ulanish sinovdan o'tdi (Ubuntu Viewer -> Windows Host). Cheklov: UAC/qulf ekrani ko'rinmaydi, faqat asosiy monitor
+- [x] Linux Viewer: crate `viewer-windows` -> `viewer` (Windows va Linux uchun bitta kod, minifb olib tashlandi, faqat egui). Ubuntu'da sinovdan o'tdi
 - [ ] Windows xizmati (UAC va login ekrani uchun)
 - [ ] Relay (agar oq IP bo'lmagan holat chiqsa)
 
@@ -210,3 +210,4 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-30 | Linux Viewer boshlandi: `crates/viewer-windows` `crates/viewer` ga o'zgartirildi, eski minifb rejimi (`--view`) olib tashlandi, GUI yagona yo'l. Buyruq: `cargo run -p viewer` |
 | 2026-10-30 | Viewer parolini ko'rsatish belgisi; "Bu kompyuter" bo'limi (Host holati, manzil, fingerprint, parol o'rnatish) qo'shildi. Build kutilmoqda |
 | 2026-10-30 | Windows Host yozildi (`crates/host-windows`): GDI ekran olish, openh264 kodlash, SendInput. Ubuntu Viewer -> Windows ulanishi uchun. Build kutilmoqda |
+| 2026-10-30 | Ikki tomonlama ulanish ishladi: Windows <-> Ubuntu (Viewer va Host ikkala tizimda). Keyingi: internet ulanishi va Host'ni UI'dan boshqarish |
