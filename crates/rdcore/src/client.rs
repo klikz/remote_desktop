@@ -17,10 +17,12 @@ use crate::{
     framing::{read_message, write_message},
     hexfmt,
     known_hosts::{KnownHosts, Trust},
-    tls,
+    tcp_tunnel, tls,
 };
 
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
+/// `Transport::Auto`: UDP javobini shuncha kutib, so'ng TCP'ga o'tiladi.
+const AUTO_UDP_TIMEOUT: Duration = Duration::from_secs(4);
 /// Portal/kodlagich ishga tushishi uchun ko'proq vaqt beriladi.
 const VIDEO_START_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -32,7 +34,31 @@ pub struct ConnectOptions<'a> {
     pub confirm_new_host: &'a dyn Fn(&str) -> bool,
 }
 
+/// Ulanish transporti: QUIC (UDP) yoki UDP bloklangan tarmoqlar uchun TCP orqali tunnel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Transport {
+    /// Avval UDP, Host'ga yetib bo'lmasa TCP.
+    #[default]
+    Auto,
+    Udp,
+    Tcp,
+}
+
+/// Host'ga (UDP orqali) yetib bo'lmadi: `Transport::Auto` shunda TCP'ga o'tadi.
+#[derive(Debug)]
+pub struct Unreachable(pub String);
+
+impl std::fmt::Display for Unreachable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Unreachable {}
+
 pub struct Session {
+    /// Ulanish TCP tunnel orqali o'rnatilganmi.
+    pub via_tcp: bool,
     endpoint: quinn::Endpoint,
     conn: quinn::Connection,
     send: quinn::SendStream,
@@ -50,7 +76,40 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Tanlangan transport bilan ulanadi.
+pub async fn connect_with(opts: ConnectOptions<'_>, transport: Transport) -> Result<Session> {
+    match transport {
+        Transport::Udp => connect(opts).await,
+        Transport::Tcp => connect_via_tcp(opts).await,
+        Transport::Auto => {
+            let again = ConnectOptions { addr: opts.addr, password: opts.password, known_hosts: opts.known_hosts, confirm_new_host: opts.confirm_new_host };
+            match connect_keyed(opts, None, AUTO_UDP_TIMEOUT).await {
+                Err(e) if e.downcast_ref::<Unreachable>().is_some() => {
+                    eprintln!("UDP orqali ulanib bo'lmadi, TCP sinab ko'riladi...");
+                    connect_via_tcp(again).await
+                }
+                other => other,
+            }
+        }
+    }
+}
+
+/// QUIC paketlarini TCP orqali tashib ulanadi (qarang: `tcp_tunnel`).
+pub async fn connect_via_tcp(opts: ConnectOptions<'_>) -> Result<Session> {
+    let key = opts.addr.to_string();
+    let local = tcp_tunnel::connect(opts.addr).await?;
+    let opts = ConnectOptions { addr: local, ..opts };
+    let mut s = connect_keyed(opts, Some(key), STEP_TIMEOUT).await?;
+    s.via_tcp = true;
+    Ok(s)
+}
+
 pub async fn connect(opts: ConnectOptions<'_>) -> Result<Session> {
+    connect_keyed(opts, None, STEP_TIMEOUT).await
+}
+
+/// `key`: known_hosts uchun manzil kaliti (TCP tunnelda haqiqiy manzil; aks holda `opts.addr`).
+async fn connect_keyed(opts: ConnectOptions<'_>, key: Option<String>, handshake_timeout: Duration) -> Result<Session> {
     let bind: SocketAddr = if opts.addr.is_ipv6() {
         "[::]:0".parse()?
     } else {
@@ -63,9 +122,12 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<Session> {
     let connecting = endpoint
         .connect_with(cfg, opts.addr, protocol::SERVER_NAME)
         .context("ulanishni boshlab bo'lmadi")?;
-    let conn = timeout(STEP_TIMEOUT, connecting)
+    let shown = key.clone().unwrap_or_else(|| opts.addr.to_string());
+    let conn = timeout(handshake_timeout, connecting)
         .await
-        .map_err(|_| anyhow!("{} ga ulanish vaqti tugadi (Host ishlayaptimi, UDP port ochiqmi?)", opts.addr))?
+        .map_err(|_| {
+            anyhow::Error::new(Unreachable(format!("{shown} ga ulanish vaqti tugadi (Host ishlayaptimi, port ochiqmi?)")))
+        })?
         .context("QUIC ulanishi muvaffaqiyatsiz")?;
 
     // Fingerprint tekshiruvi: hech qanday maxfiy ma'lumot yuborilmasdan oldin.
@@ -76,7 +138,7 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<Session> {
         .ok_or_else(|| anyhow!("Host sertifikati olinmadi"))?;
     let fp_bytes = sha256(&cert_der);
     let fp = hexfmt::colon(&fp_bytes);
-    let key = opts.addr.to_string();
+    let key = key.unwrap_or_else(|| opts.addr.to_string());
     match opts.known_hosts.check(&key, &fp)? {
         Trust::Known => {}
         Trust::Unknown => {
@@ -126,6 +188,7 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<Session> {
     };
 
     Ok(Session {
+        via_tcp: false,
         endpoint,
         conn,
         send,

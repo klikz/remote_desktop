@@ -21,4 +21,5 @@ pub mod known_hosts;
 pub mod paths;
 pub mod ratelimit;
 pub mod server;
+pub mod tcp_tunnel;
 pub mod tls;
