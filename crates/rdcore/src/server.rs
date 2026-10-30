@@ -168,7 +168,13 @@ async fn serve(incoming: quinn::Incoming, state: &State, ip: IpAddr, handler: Ha
         bail!("AuthProof kutilgan edi");
     };
 
-    if !auth::verify_proof(&state.creds.key, &nonce, &state.fingerprint, &proof) {
+    let permanent = auth::verify_proof(&state.creds.key, &nonce, &state.fingerprint, &proof);
+    let one_time = !permanent
+        && crate::onetime::load_key().is_some_and(|k| auth::verify_proof(&k, &nonce, &state.fingerprint, &proof));
+    if one_time {
+        crate::onetime::consume();
+    }
+    if !permanent && !one_time {
         state.limiter.record_failure(ip);
         write_message(
             &mut send,

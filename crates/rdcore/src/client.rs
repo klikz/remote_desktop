@@ -104,6 +104,13 @@ pub async fn connect_via_tcp(opts: ConnectOptions<'_>) -> Result<Session> {
     Ok(s)
 }
 
+/// Relay serveri orqali ochilgan lokal UDP ko'prikka (`opts.addr`) ulanadi. `key`: known_hosts kaliti (`id:123456789`).
+pub async fn connect_relayed(opts: ConnectOptions<'_>, key: String) -> Result<Session> {
+    let mut s = connect_keyed(opts, Some(key), STEP_TIMEOUT).await?;
+    s.via_tcp = true;
+    Ok(s)
+}
+
 pub async fn connect(opts: ConnectOptions<'_>) -> Result<Session> {
     connect_keyed(opts, None, STEP_TIMEOUT).await
 }

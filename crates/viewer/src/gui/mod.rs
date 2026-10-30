@@ -1,12 +1,16 @@
 //! Viewer'ning oynali interfeysi (egui): ulanish oynasi, saqlangan Host'lar, sifat sozlamalari,
 //! fingerprint tasdig'i va ulanish ichidagi panel.
 
+mod firewall;
 mod hostpanel;
 #[cfg(windows)]
 mod winhost;
 mod hosts;
 mod input;
 mod keys;
+#[cfg(target_os = "linux")]
+mod linuxhost;
+mod relaypanel;
 mod session;
 mod theme;
 
@@ -43,6 +47,7 @@ const HEIGHTS: [(u16, &str); 5] = [(720, "720p"), (1080, "1080p"), (1440, "1440p
 #[derive(PartialEq, Clone, Copy)]
 enum Tab {
     Connect,
+    Relay,
     ThisPc,
 }
 
@@ -78,6 +83,9 @@ struct Stats {
 struct App {
     tab: Tab,
     host: hostpanel::HostPanel,
+    relay: relaypanel::RelayPanel,
+    /// Server orqali ulanayotgan ID (muvaffaqiyatda kontaktlarga saqlanadi).
+    relay_target: Option<String>,
     screen: Screen,
     hosts: Vec<SavedHost>,
     selected: Option<usize>,
@@ -100,6 +108,8 @@ impl App {
         let mut app = App {
             tab: Tab::Connect,
             host: hostpanel::HostPanel::new(),
+            relay: relaypanel::RelayPanel::new(),
+            relay_target: None,
             screen: Screen::Form,
             hosts,
             selected: None,
@@ -181,6 +191,7 @@ impl App {
         self.input_on = f.input;
         self.tex = None;
         self.fwd = input::Forwarder::default();
+        self.relay_target = None;
         self.handle = Some(session::start(
             ctx.clone(),
             session::Params {
@@ -190,6 +201,36 @@ impl App {
                 kbps: f.kbps,
                 height: f.height,
                 transport: f.transport,
+                relay: None,
+            },
+        ));
+        self.screen = Screen::Connecting;
+    }
+
+    /// Server (relay) orqali ID ga ulanadi. Sifat sozlamalari "Ulanish" bo'limidagi formadan olinadi.
+    fn connect_relay(&mut self, ctx: &egui::Context, req: relaypanel::ConnectRequest) {
+        let Some(connector) = self.relay.connector() else {
+            self.error = Some("Server bilan aloqa yo'q".into());
+            return;
+        };
+        let f = &self.form;
+        self.error = None;
+        self.fingerprint.clear();
+        self.title = format!("ID {}", rdcore::relay::pretty_id(&req.id));
+        self.input_on = f.input;
+        self.tex = None;
+        self.fwd = input::Forwarder::default();
+        self.relay_target = Some(req.id.clone());
+        self.handle = Some(session::start(
+            ctx.clone(),
+            session::Params {
+                addr: String::new(),
+                password: req.password,
+                fps: f.fps,
+                kbps: f.kbps,
+                height: f.height,
+                transport: Transport::Auto,
+                relay: Some((req.id, connector)),
             },
         ));
         self.screen = Screen::Connecting;
@@ -257,7 +298,10 @@ impl App {
         }
         if connected {
             // parol to'g'ri, Host ishonchli: ro'yxatga saqlanadi (yoki sozlamalari yangilanadi)
-            self.remember_host();
+            match self.relay_target.clone() {
+                Some(id) => self.relay.remember_contact(&id),
+                None => self.remember_host(),
+            }
         }
         if let Some(msg) = ended {
             let was_viewing = self.screen == Screen::Viewing;
@@ -280,16 +324,30 @@ impl App {
                 if theme::tab(ui, self.tab == Tab::Connect, "Ulanish").clicked() {
                     self.tab = Tab::Connect;
                 }
+                if theme::tab(ui, self.tab == Tab::Relay, "Server orqali").clicked() {
+                    self.tab = Tab::Relay;
+                }
                 if theme::tab(ui, self.tab == Tab::ThisPc, "Bu kompyuter").clicked() {
                     self.tab = Tab::ThisPc;
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     theme::chip(ui, host_label, if host_on { theme::GOOD } else { theme::DIM });
+                    if self.relay.is_online() {
+                        theme::chip(ui, "Server: onlayn", theme::GOOD);
+                    }
                 });
             });
         });
         if self.tab == Tab::ThisPc {
             egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| self.host.ui(ui));
+            return;
+        }
+        if self.tab == Tab::Relay {
+            let mut req = None;
+            egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| req = self.relay.ui(ui));
+            if let Some(r) = req {
+                self.connect_relay(ctx, r);
+            }
             return;
         }
 
@@ -496,6 +554,9 @@ impl App {
                 let what = if self.fingerprint.is_empty() { "Ulanilmoqda" } else { "Video kutilmoqda" };
                 ui.label(RichText::new(what).size(17.0).strong());
                 ui.label(theme::dim(&self.title));
+                if self.relay_target.is_some() && self.fingerprint.is_empty() {
+                    theme::hint(ui, "Qabul qiluvchi ruxsat berishi kutilmoqda (30 soniyagacha)");
+                }
                 ui.add_space(14.0);
                 cancel = ui.add(egui::Button::new("Bekor qilish").min_size(egui::vec2(140.0, 32.0))).clicked();
             });
@@ -653,11 +714,13 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_session(ctx);
+        self.relay.poll(ctx);
         match self.screen {
             Screen::Form => self.ui_form(ctx),
             Screen::Connecting => self.ui_connecting(ctx),
             Screen::Viewing => self.ui_viewing(ctx),
         }
         self.ui_confirm(ctx);
+        self.relay.incoming_dialog(ctx);
     }
 }

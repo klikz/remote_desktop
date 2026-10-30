@@ -25,9 +25,9 @@ fn provider() -> Arc<CryptoProvider> {
     Arc::new(ring_provider::default_provider())
 }
 
-fn transport() -> Result<Arc<quinn::TransportConfig>> {
+fn transport(max_bidi: u32) -> Result<Arc<quinn::TransportConfig>> {
     let mut t = quinn::TransportConfig::default();
-    t.max_concurrent_bidi_streams(16u32.into());
+    t.max_concurrent_bidi_streams(max_bidi.into());
     t.keep_alive_interval(Some(Duration::from_secs(5)));
     t.max_idle_timeout(Some(
         quinn::IdleTimeout::try_from(Duration::from_secs(30)).context("idle timeout")?,
@@ -36,6 +36,11 @@ fn transport() -> Result<Arc<quinn::TransportConfig>> {
 }
 
 pub fn server_config(identity: &HostIdentity) -> Result<quinn::ServerConfig> {
+    server_config_alpn(identity, protocol::ALPN, 16)
+}
+
+/// Boshqa ALPN va oqimlar soni bilan (relay serveri).
+pub fn server_config_alpn(identity: &HostIdentity, alpn: &[u8], max_bidi: u32) -> Result<quinn::ServerConfig> {
     let mut tls = rustls::ServerConfig::builder_with_provider(provider())
         .with_protocol_versions(&[&rustls::version::TLS13])
         .context("TLS versiyasi")?
@@ -45,10 +50,10 @@ pub fn server_config(identity: &HostIdentity) -> Result<quinn::ServerConfig> {
             PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(identity.key_der.clone())),
         )
         .context("sertifikat yoki kalit noto'g'ri")?;
-    tls.alpn_protocols = vec![protocol::ALPN.to_vec()];
+    tls.alpn_protocols = vec![alpn.to_vec()];
     let crypto = quinn::crypto::rustls::QuicServerConfig::try_from(tls).context("QUIC server sozlamasi")?;
     let mut cfg = quinn::ServerConfig::with_crypto(Arc::new(crypto));
-    cfg.transport_config(transport()?);
+    cfg.transport_config(transport(max_bidi)?);
     Ok(cfg)
 }
 
@@ -96,6 +101,10 @@ impl ServerCertVerifier for CaptureVerifier {
 }
 
 pub fn client_config(seen: SeenCert) -> Result<quinn::ClientConfig> {
+    client_config_alpn(seen, protocol::ALPN, 16)
+}
+
+pub fn client_config_alpn(seen: SeenCert, alpn: &[u8], max_bidi: u32) -> Result<quinn::ClientConfig> {
     let provider = provider();
     let mut tls = rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_protocol_versions(&[&rustls::version::TLS13])
@@ -103,9 +112,9 @@ pub fn client_config(seen: SeenCert) -> Result<quinn::ClientConfig> {
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(CaptureVerifier { seen, provider }))
         .with_no_client_auth();
-    tls.alpn_protocols = vec![protocol::ALPN.to_vec()];
+    tls.alpn_protocols = vec![alpn.to_vec()];
     let crypto = quinn::crypto::rustls::QuicClientConfig::try_from(tls).context("QUIC klient sozlamasi")?;
     let mut cfg = quinn::ClientConfig::new(Arc::new(crypto));
-    cfg.transport_config(transport()?);
+    cfg.transport_config(transport(max_bidi)?);
     Ok(cfg)
 }

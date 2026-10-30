@@ -29,6 +29,18 @@ $DOCKER run --rm \
     -v rd-cargo-registry:/opt/cargo/registry \
     -v rd-cargo-git:/opt/cargo/git \
     -w /src "$IMG" \
-    bash -c 'cargo build --release -p "$0" --target-dir target-noble && chown -R "$OWNER" target-noble' "$PKG"
+    bash -c '
+set -e
+# viewer: avval Linux Host (host-linux) build qilinadi va viewer ichiga joylanadi,
+# shunda bitta fayl ham Viewer, ham Host o'"'"'rnatuvchisi bo'"'"'ladi.
+if [ "$0" = "viewer" ]; then
+  cargo build --release -p host-linux --target-dir target-noble
+  export RD_HOST_BIN=/src/target-noble/release/host-linux
+fi
+cargo build --release -p "$0" --target-dir target-noble
+chown -R "$OWNER" target-noble' "$PKG"
 
 echo "==> Tayyor: $PWD/target-noble/release/$PKG"
+if [ "$PKG" = "viewer" ]; then
+    echo "    (ichida Linux Host ham bor: \"Bu kompyuter\" > \"Ulanishga ruxsat berish\" uni o'zi o'rnatadi)"
+fi

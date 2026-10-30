@@ -30,6 +30,14 @@ pub struct HostPanel {
     svc: Option<(std::time::Instant, Option<String>, bool)>,
     #[cfg(target_os = "linux")]
     svc_msg: Option<(bool, String)>,
+    #[cfg(target_os = "linux")]
+    install_rx: Option<std::sync::mpsc::Receiver<super::linuxhost::Msg>>,
+    #[cfg(target_os = "linux")]
+    install_step: String,
+    #[cfg(target_os = "linux")]
+    host_current: bool,
+    #[cfg(target_os = "linux")]
+    autologin: bool,
 }
 
 fn local_ip() -> String {
@@ -98,6 +106,14 @@ impl HostPanel {
             svc: None,
             #[cfg(target_os = "linux")]
             svc_msg: None,
+            #[cfg(target_os = "linux")]
+            install_rx: None,
+            #[cfg(target_os = "linux")]
+            install_step: String::new(),
+            #[cfg(target_os = "linux")]
+            host_current: super::linuxhost::installed_is_current(),
+            #[cfg(target_os = "linux")]
+            autologin: true,
         }
     }
 
@@ -206,24 +222,72 @@ impl HostPanel {
         self.svc.as_ref().and_then(|(_, s, _)| s.clone())
     }
 
+    /// Dastur ichiga joylangan Host'ni o'rnatishni boshlaydi (yoki yangilaydi).
+    #[cfg(target_os = "linux")]
+    fn start_install(&mut self) {
+        self.svc_msg = None;
+        self.install_step = "Boshlanmoqda...".into();
+        self.install_rx = Some(super::linuxhost::spawn_install(self.autologin));
+    }
+
+    #[cfg(target_os = "linux")]
+    fn poll_install(&mut self, ctx: &egui::Context) {
+        use super::linuxhost::Msg;
+        let Some(rx) = &self.install_rx else { return };
+        let mut finished = None;
+        while let Ok(m) = rx.try_recv() {
+            match m {
+                Msg::Step(t) => self.install_step = t,
+                Msg::Done(r) => finished = Some(r),
+            }
+        }
+        match finished {
+            Some(Ok(())) => {
+                self.install_rx = None;
+                self.svc = None;
+                self.host_current = super::linuxhost::installed_is_current();
+                self.svc_msg = Some((true, "Host ishlayapti: ulanishlar qabul qilinadi.".into()));
+            }
+            Some(Err(e)) => {
+                self.install_rx = None;
+                self.svc = None;
+                self.svc_msg = Some((false, e));
+            }
+            None => ctx.request_repaint_after(std::time::Duration::from_millis(200)),
+        }
+    }
+
     /// Host xizmatini yoqadi (ishga tushiradi va avtostartga qo'shadi) yoki o'chiradi.
     #[cfg(target_os = "linux")]
     fn set_service(&mut self, on: bool) {
-        let verb = if on { "enable" } else { "disable" };
+        if on {
+            // To'liq tekshiruv: Host fayli dasturda bo'lsa qayta o'rnatiladi (fayl, xizmat, GNOME), bo'lmasa
+            // xizmat qayta ishga tushiriladi; ikkala holatda ham ishlayotgani tekshiriladi.
+            self.svc_msg = None;
+            if super::linuxhost::embedded_available() {
+                self.start_install();
+            } else {
+                self.install_step = "Host ishga tushirilmoqda".into();
+                self.install_rx = Some(super::linuxhost::spawn_start());
+            }
+            return;
+        }
         let ok = std::process::Command::new("systemctl")
-            .args(["--user", verb, "--now", "remote-desktop-host"])
+            .args(["--user", "disable", "--now", "remote-desktop-host"])
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
         self.svc = None;
         self.svc_msg = Some(if ok {
-            (true, if on { "Host yoqildi: ulanishlar qabul qilinadi.".into() } else { "Host o'chirildi.".into() })
+            (true, "Host o'chirildi.".into())
         } else {
-            (false, "Xizmatni boshqarib bo'lmadi. Terminalda: systemctl --user status remote-desktop-host".into())
+            (false, "Xizmatni to'xtatib bo'lmadi".into())
         });
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
+        #[cfg(target_os = "linux")]
+        self.poll_install(ui.ctx());
         #[cfg(target_os = "linux")]
         let svc = self.service_state_cached();
         #[cfg(target_os = "linux")]
@@ -298,10 +362,30 @@ impl HostPanel {
 
             #[cfg(target_os = "linux")]
             theme::card(ui, Some("ULANISHGA RUXSAT"), |ui| {
-                if !svc_installed {
-                    ui.label(RichText::new("Host xizmati o'rnatilmagan.").color(theme::WARN));
-                    theme::hint(ui, "Loyiha bilan: bash ./scripts/install-host.sh");
-                    theme::hint(ui, "Tayyor fayl bilan: bash install-host-binary.sh (host-linux fayli yonida)");
+                let embedded = super::linuxhost::embedded_available();
+                let pw_ok = Self::password_is_set();
+                if self.install_rx.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new().size(18.0).color(theme::ACCENT));
+                        ui.label(&self.install_step);
+                    });
+                } else if !svc_installed {
+                    if embedded {
+                        theme::hint(ui, "Host hali o'rnatilmagan. Tugma kerakli paketlarni o'rnatadi va xizmatni yoqadi.");
+                        ui.add_space(4.0);
+                        ui.checkbox(&mut self.autologin, "Kompyuter yonganda avtomatik kirish (GDM)");
+                        ui.add_space(4.0);
+                        if !pw_ok {
+                            ui.label(RichText::new("Avval pastda ulanish parolini o'rnating.").color(theme::WARN));
+                        }
+                        if theme::accent_button(ui, "Ulanishga ruxsat berish", egui::vec2(220.0, 34.0), pw_ok).clicked() {
+                            self.start_install();
+                        }
+                    } else {
+                        ui.label(RichText::new("Host xizmati o'rnatilmagan.").color(theme::WARN));
+                        theme::hint(ui, "Loyiha bilan: bash ./scripts/install-host.sh");
+                        theme::hint(ui, "Tayyor fayl bilan: bash install-host-binary.sh (host-linux fayli yonida)");
+                    }
                 } else {
                     let mut on = matches!(svc.as_deref(), Some("active") | Some("activating"));
                     let label = if on { "Ulanishga ruxsat berilgan" } else { "Ulanishga ruxsat berish" };
@@ -309,10 +393,42 @@ impl HostPanel {
                         self.set_service(on);
                     }
                     theme::hint(ui, "Yoqilsa, Host kompyuter ishga tushganda ham o'zi yonadi.");
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if super::linuxhost::autologin_enabled() {
+                            theme::chip(ui, "Avtomatik kirish yoqilgan", theme::GOOD);
+                        } else {
+                            theme::chip(ui, "Avtomatik kirish o'chiq", theme::WARN);
+                            if ui.small_button("Yoqish").clicked() {
+                                self.svc_msg = None;
+                                self.install_step = "Avtomatik kirish yoqilmoqda".into();
+                                self.install_rx = Some(super::linuxhost::spawn_autologin());
+                            }
+                        }
+                    });
+                    if !super::linuxhost::autologin_enabled() {
+                        theme::hint(ui, "Avtomatik kirishsiz kompyuter qayta yonganda hech kim kirmaydi va Host ishga tushmaydi.");
+                    }
+                    if embedded && !self.host_current {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new("Dasturdagi Host yangiroq.").color(theme::WARN));
+                        if theme::accent_button(ui, "Host'ni yangilash", egui::vec2(180.0, 32.0), pw_ok).clicked() {
+                            self.start_install();
+                        }
+                    }
                 }
                 if let Some((ok, text)) = &self.svc_msg {
                     ui.add_space(4.0);
-                    ui.label(RichText::new(text).color(if *ok { theme::GOOD } else { theme::BAD }));
+                    let (first, rest) = text.split_once('\n').unwrap_or((text.as_str(), ""));
+                    ui.label(RichText::new(first).color(if *ok { theme::GOOD } else { theme::BAD }));
+                    if !rest.is_empty() {
+                        egui::ScrollArea::vertical().id_salt("svc_log").max_height(160.0).show(ui, |ui| {
+                            ui.label(RichText::new(rest).monospace().size(11.0).color(theme::DIM));
+                        });
+                        if ui.small_button("Logni nusxalash").clicked() {
+                            ui.ctx().output_mut(|o| o.copied_text = text.clone());
+                        }
+                    }
                 }
             });
 

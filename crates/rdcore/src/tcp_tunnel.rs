@@ -62,7 +62,16 @@ fn loopback_for(real: IpAddr) -> Ipv4Addr {
 /// `learn`: UDP tomondagi manzilni oxirgi kelgan paketdan o'rganadi (Viewer tomoni: quinn manzili).
 async fn pump(tcp: TcpStream, udp: UdpSocket, dst: Option<SocketAddr>, learn: bool) {
     let _ = tcp.set_nodelay(true);
-    let (mut rd, mut wr) = tcp.into_split();
+    let (rd, wr) = tcp.into_split();
+    pump_io(rd, wr, udp, dst, learn).await
+}
+
+/// `pump` har qanday oqim juftligi uchun (TCP yoki relay serveriga ochilgan QUIC oqimi).
+pub(crate) async fn pump_io<R, W>(mut rd: R, mut wr: W, udp: UdpSocket, dst: Option<SocketAddr>, learn: bool)
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let udp = Arc::new(udp);
     let dst = Arc::new(Mutex::new(dst));
 

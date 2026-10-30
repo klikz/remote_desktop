@@ -162,6 +162,96 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Windows xizmati (UAC va login ekrani uchun)
 - [ ] Relay (agar oq IP bo'lmagan holat chiqsa)
 
+### Bosqich 9. Bitta fayl: hammasi UI orqali (foydalanuvchi terminal ishlatmaydi)
+Maqsad: foydalanuvchi bitta faylni ochadi va hamma ishni oynadan bajaradi: Host'ni o'rnatish, yoqish,
+muammolarni topish va tuzatish. Dastur ichkarida bir necha fayldan iborat bo'lishi mumkin (Host fayli,
+xizmat, sozlamalar), lekin ularni dasturning o'zi joylaydi. Terminal faqat oxirgi zaxira yo'li.
+
+Mavjud asos: Linux'da `viewer` ichiga `host-linux` joylangan; "Ulanishga ruxsat berish" paketlarni
+(pkexec), Host faylini, GNOME sozlamalarini va systemd xizmatini o'rnatadi. Windows'da Host `viewer.exe` ichida.
+
+**9.1 Ichki diagnostika (birinchi navbatda: muammolarni terminalsiz ko'rish uchun)**
+- [ ] Host'ga `diagnose` buyrug'i: sessiya turi (Wayland/Xorg), GNOME va portal versiyalari, RemoteDesktop
+      portalining `AvailableDeviceTypes` va versiyasi, GStreamer elementlari va tanlangan kodlagich, parol, port,
+      UDP/TCP tinglash, `ufw` holati
+- [ ] UI'da "Diagnostika" kartasi: har tekshiruv uchun yashil/qizil belgi va kerak bo'lsa "Tuzatish" tugmasi
+- [ ] Host logi UI ichida (`journalctl --user` oxirgi qatorlari) va "Logni nusxalash" tugmasi
+- [ ] "Batafsil log" belgisi: xizmatni `RD_DEBUG=1` bilan qayta ishga tushiradi
+- Qabul mezoni: Ubuntu 24.04 dagi kiritish muammosining sababi terminalsiz, UI'dan olingan log bilan aniqlanadi
+
+**9.2 Ubuntu 24.04 (GNOME 46) da sichqoncha va klaviatura**
+Holat: 26.04 (GNOME 50) da ishlaydi, 24.04 da video bor, kiritish yo'q. Tekshiriladigan sabablar:
+- [ ] Portal ruxsati: GNOME 46 da RemoteDesktop sessiyasini eslab qolish (restore token) qo'llanadimi;
+      qo'llanmasa, qarovsiz rejimda har ulanishda ruxsat so'raladi va kiritish bloklanadi
+- [ ] Koordinatalar: GNOME 50 kasr masshtabi uchun yozilgan gibrid (absolute + relative) mantiq GNOME 46 da
+      "noto'g'ri pozitsiya" xatosi bilan rad etilishi mumkin: versiyaga qarab kiritish rejimini tanlash
+- [ ] Sessiya turi: Xorg bo'lsa, ogohlantirish va Wayland'ga o'tish yo'riqnomasi UI'da
+- [ ] Yetishmagan paketlar (masalan `xdg-desktop-portal-gnome`) avtomatik o'rnatiladi
+- Qabul mezoni: 24.04 va 26.04 da kiritish ishlaydi, qayta yuklashdan keyin ham
+
+**9.3 Bir tugmali o'rnatish (Linux)**
+- [x] Paketlar (pkexec), Host faylini chiqarish, GNOME qulf/uyqu, systemd xizmati, ixtiyoriy avtomatik kirish
+- [ ] Portal ruxsatini o'rnatish paytida olish: tugma bosilganda Host darhol portal sessiyasini ochadi, foydalanuvchi
+      shu kompyuter oldida turganda GNOME ruxsat oynasi chiqadi (UI: "Ekrandagi oynada Ruxsat berish ni bosing",
+      boshqarish ham yoqilgan bo'lsin). Token saqlanadi, keyin qarovsiz ishlaydi
+- [ ] Dasturni o'zini o'rnatish: birinchi ochilishda `~/.local/bin` ga ko'chirish va menyuga yorliq (`.desktop`)
+- [ ] pkexec yo'q yoki ishlamasa: terminal oynasini (`gnome-terminal` / `x-terminal-emulator`) tayyor buyruq bilan
+      ochish (zaxira yo'li, foydalanuvchi faqat parol kiritadi)
+
+**9.4 "Ulanishga ruxsat berish": avtomatik ishga tushirish va o'z-o'zini tuzatish**
+- [ ] Bitta tugma mantiqi: o'rnatilmagan -> o'rnatish; to'xtagan -> ishga tushirish; yiqilgan -> logdan sababini
+      aniqlash (parol yo'q, port band, portal rad etdi, kodlagich yo'q, paket yo'q), tuzatish va qayta urinish
+- [ ] Holatni kuzatish: Host qayta-qayta yiqilsa, UI'da sabab va "Tuzatish" tugmasi
+- [ ] Viewer oynasi yopilsa ham Host ishlayveradi (systemd), dastur qayta ochilganda holat to'g'ri ko'rinadi
+- [~] Muammo (24.04 sinovi): Host faqat `install-host-binary.sh --autologin` dan keyin ishga tushdi, UI'dagi belgi
+      Host to'xtagan holatda uni ko'tarmadi. Sabab: (1) build'da Host dastur ichiga joylanmagan edi (o'zgarishlar
+      push qilinmagan), (2) belgi faqat `enable --now` qilardi, (3) avtomatik kirish UI'da standart o'chiq edi.
+      Tuzatildi (sinov kutilmoqda): belgi yoqilganda to'liq qayta o'rnatish + `reset-failed` + restart + 3 s dan keyin
+      tekshiruv, yiqilsa log UI'da; avtomatik kirish standart yoqilgan, holati va "Yoqish" tugmasi doim ko'rinadi
+
+**9.5 Windows (tenglik)**
+- [x] Host `viewer.exe` ichida, ruxsat holati eslab qolinadi, avtostart
+- [ ] Firewall qoidasini (UDP va TCP) dastur o'zi qo'shadi (UAC so'raladi)
+
+**9.6 Yangilash**
+- [~] Linux: ichidagi Host yangiroq bo'lsa "Host'ni yangilash" tugmasi
+- [ ] O'rnatilgan dastur nusxasini ham yangilash (9.3 dagi o'z-o'zini o'rnatish bilan)
+
+**9.8 Qulflangan ekranda ishlash (tadqiqot)**
+Holat: GNOME (Wayland) portal orqali ekran olish va kiritishni ekran qulflanganda bermaydi (xavfsizlik uchun
+ataylab shunday), qulf paytidagi urinish saqlangan ruxsat tokenini ham buzishi mumkin. Shu sabab hozir qulf o'chiriladi.
+- [ ] GNOME "Remote Login" (gnome-remote-desktop, tizim darajasidagi RDP, GDM orqali): qulf va login ekranida ishlaydi,
+      lekin RDP protokoli va alohida sessiya: bizning Viewer bilan to'g'ridan-to'g'ri mos emas, baholash
+- [ ] Mutter'ning ichki D-Bus API'si (`org.gnome.Mutter.RemoteDesktop/ScreenCast`) ni to'g'ridan-to'g'ri ishlatish:
+      rasmiy emas, GNOME versiyalari orasida o'zgarishi mumkin, qulfda ishlashi tekshirilishi kerak
+- [ ] Uchinchi tomon GNOME kengaytmasi "Allow Locked Remote Desktop" ni 24.04 va 26.04 da sinash
+- [ ] Natijaga qarab: UI'da tanlov "Qulfni o'chirish (tavsiya)" yoki "Qulf bilan ishlash (tajribaviy)"
+
+**9.7 Sinov matritsasi**
+- [ ] Ubuntu 24.04 (GNOME 46), Ubuntu 26.04 (GNOME 50), Windows 10/11
+- [ ] Toza tizim (hech narsa o'rnatilmagan), qayta yuklash, LAN va internet (UDP va TCP)
+
+Tartib: 9.1 -> 9.2 -> 9.3 (portal ruxsati) -> 9.4 -> 9.5 -> 9.6, har bosqichdan keyin 9.7 bo'yicha sinov.
+
+### Bosqich 10. Server (relay) rejimi
+Ikkinchi ish rejimi: hozirgi P2P (to'g'ridan-to'g'ri IP:port) o'zgarishsiz qoladi. Viewer ichida "Server rejimi" yoqilsa, shu
+kompyuter (oq, statik IP, 10-50 client) relay serveriga aylanadi. Clientlar serverga o'zlari ulanib turadi (dynamic IP va NAT
+muammo emas), 9 xonali ID oladi va bir-biriga ID orqali ulanadi. Video server orqali o'tadi, lekin ichki QUIC/TLS/parol
+end-to-end qoladi (server trafikni o'qiy olmaydi): server faqat ikki clientning oqimlarini ulaydi (`tcp_tunnel::pump_io` qayta ishlatiladi).
+- [x] `rdcore::relay`: `msg` (matn xabarlari), `registry` (ID/token/nom/oxirgi vaqt fayli), `server` (ro'yxatdan o'tish, onlayn holat,
+      ulanish so'rovi, oqim juftlash), `agent` (doimiy ulanish, qayta ulanish, kiruvchi so'rovlar, ID bo'yicha ulanish); ALPN `rd-relay/1`
+- [x] Bir martalik parol (`onetime.rs`): `serve()` doimiy parol bilan birga qabul qiladi (60 s, bir marta)
+- [x] Dialogli (30 s, avtomatik rad) va qarovsiz (Host paroli) rejim; "Doim ruxsat" ishonchli ro'yxati
+- [x] UI: "Server orqali" bo'limi (ID bilan ulanish, kontaktlar onlayn/oflayn, o'z ID, rejim, server rejimi, ulangan clientlar, firewall tugmasi)
+- [x] Firewall: Windows (UAC + netsh), Ubuntu (pkexec + ufw faol bo'lsa) (`gui/firewall.rs`)
+- [x] Test: `rdcore/tests/relay.rs` (ikki client, dialog qabul/rad, bir martalik parol, qarovsiz, yo'q/oflayn ID, noto'g'ri server kaliti)
+- [ ] Sinov: haqiqiy ikki kompyuter (Windows server + Ubuntu client), mobil tarmoq (simmetrik NAT), UI qo'lda
+- [ ] Relay serveriga TCP zaxira (UDP bloklangan tarmoqlar uchun clientdan serverga)
+- [ ] Ishlash o'lchovi: ichki QUIC tashqi oqim ustida (kechikish/yo'qotish); yomon bo'lsa QUIC datagram'ga o'tish
+- [ ] Xavfsizlik: serverning birinchi ulanishdagi fingerprint'i hozir avtomatik saqlanadi (TOFU); UI'da tasdiqlash oynasi qo'shish
+Qoldiq xavf: dialogli rejimda bir martalik parol server orqali o'tadi, shuning uchun serverga ishonish kerak (qarovsiz rejimda parol
+serverga hech qachon yuborilmaydi). Host fingerprint'i `id:<ID>` kaliti bilan birinchi ulanishda pin qilinadi.
+
 ## 6. Xavfsizlik talablari
 
 - [ ] Barcha trafik shifrlangan
@@ -218,3 +308,8 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-30 | UI qayta dizayn: `theme.rs` (qorong'i zamonaviy mavzu, kartalar, chip'lar), chap panelda Host kartalari, ixcham forma, "Bu kompyuter" kartalari, yangi sessiya paneli. Build kutilmoqda |
 | 2026-10-30 | `scripts/build-noble.sh` + `docker/Dockerfile.noble`: Ubuntu 24.04 uchun tez, keshlanadigan build (image bir marta, cargo keshi volume'da) |
 | 2026-10-30 | `scripts/install-host-binary.sh`: tayyor `host-linux` fayldan (repo/cargo siz) Host o'rnatish; Dockerfile'ga GStreamer dev paketlari qo'shildi (`build-noble.sh host-linux`) |
+| 2026-10-30 | Linux: bitta fayl. Viewer ichiga `host-linux` joylanadi (`build.rs`, `RD_HOST_BIN`); "Ulanishga ruxsat berish" paketlarni o'rnatadi (pkexec), Host'ni chiqaradi, GNOME sozlamalarini qo'llaydi va systemd xizmatini yoqadi (`gui/linuxhost.rs`). Build kutilmoqda |
+| 2026-10-30 | Reja: Bosqich 9 "Bitta fayl, hammasi UI orqali" (diagnostika, Ubuntu 24.04 kiritish, portal ruxsatini o'rnatishda olish, avtomatik ishga tushirish va tuzatish) |
+| 2026-10-30 | Linux "Ulanishga ruxsat": yoqilganda to'liq tekshiruv (Host qayta o'rnatiladi, reset-failed, restart, 3 s dan keyin holat tekshiriladi, yiqilsa log UI'da); avtomatik kirish standart yoqilgan va holati/“Yoqish” tugmasi doim ko'rinadi |
+| 2026-10-30 | Reja: 9.4 ga 24.04 dagi "Host faqat skript bilan ishga tushdi" muammosi, 9.8 qulflangan ekranda ishlash tadqiqoti qo'shildi |
+| 2026-10-30 | Bosqich 10: server (relay) rejimi: `rdcore::relay` (server, agent, registry), bir martalik parol, UI "Server orqali", firewall; rdcore testlari o'tdi, haqiqiy qurilmalarda sinov kutilmoqda |

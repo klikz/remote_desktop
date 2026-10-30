@@ -5,7 +5,8 @@ use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 use protocol::{InputEvent, DEFAULT_PORT};
 use rdcore::{
-    client::{connect_with, ConnectOptions, Transport},
+    client::{connect_relayed, connect_with, ConnectOptions, Transport},
+    relay::agent::Connector,
     known_hosts::KnownHosts,
     paths,
 };
@@ -28,6 +29,8 @@ pub struct Params {
     pub kbps: u32,
     pub height: u16,
     pub transport: Transport,
+    /// Server (relay) orqali ulanish: qabul qiluvchi ID va agent tutqichi (`addr` e'tiborsiz qoldiriladi).
+    pub relay: Option<(String, Connector)>,
 }
 
 /// Dekodlangan kadr (RGB, 3 bayt/piksel).
@@ -124,7 +127,6 @@ async fn run(
     ev_tx: mpsc::Sender<Event>,
     mut cmd_rx: UnboundedReceiver<Cmd>,
 ) -> Result<Option<String>> {
-    let addr = resolve(&p.addr).await?;
     let known_hosts = KnownHosts::new(paths::known_hosts_file()?);
 
     // Fingerprint tasdig'i: UI'ga so'rov yuboriladi va javob kutiladi (bu oqim faqat shu ulanishniki).
@@ -139,11 +141,33 @@ async fn run(
         rx.recv().unwrap_or(false)
     };
 
-    let mut session = connect_with(
-        ConnectOptions { addr, password: &p.password, known_hosts: &known_hosts, confirm_new_host: &confirm },
-        p.transport,
-    )
-    .await?;
+    let mut session = match &p.relay {
+        Some((id, connector)) => {
+            // Server qabul qiluvchidan ruxsat so'raydi (u 30 soniya o'ylaydi)
+            let relayed = connector
+                .connect(id)
+                .await
+                .map_err(|_| anyhow::anyhow!("relay agenti to'xtagan"))?
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let password = relayed.pw.clone().unwrap_or_else(|| p.password.clone());
+            if password.is_empty() {
+                anyhow::bail!("bu kompyuter qarovsiz rejimda: Host parolini kiriting");
+            }
+            connect_relayed(
+                ConnectOptions { addr: relayed.local, password: &password, known_hosts: &known_hosts, confirm_new_host: &confirm },
+                format!("id:{id}"),
+            )
+            .await?
+        }
+        None => {
+            let addr = resolve(&p.addr).await?;
+            connect_with(
+                ConnectOptions { addr, password: &p.password, known_hosts: &known_hosts, confirm_new_host: &confirm },
+                p.transport,
+            )
+            .await?
+        }
+    };
     let _ = ev_tx.send(Event::Connected { fingerprint: session.fingerprint.clone(), via_tcp: session.via_tcp });
     ctx.request_repaint();
 

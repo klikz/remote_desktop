@@ -1,8 +1,8 @@
 //! xdg-desktop-portal (ScreenCast + RemoteDesktop) sessiyasi.
 //!
 //! Sessiya bitta fon vazifasida yashaydi. Ruxsat (restore token) faylda saqlanadi, shuning uchun
-//! dialog faqat birinchi marta chiqadi. Sessiya yaroqsiz bo'lib qolsa (masalan ekran qulflansa),
-//! keyingi so'rovda qayta ochiladi.
+//! dialog faqat birinchi marta chiqadi. Sessiya Host ishga tushganda darhol ochiladi (qulflangan ekranda
+//! yangi sessiya ochilmaydi, ochilgani esa ishlaydi); yaroqsiz bo'lib qolsa o'zi qayta ochiladi.
 
 use anyhow::{anyhow, Context, Result};
 use ashpd::desktop::{
@@ -94,18 +94,19 @@ fn save_token(path: &PathBuf, token: &str) -> Result<()> {
 }
 
 async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
-    let mut pending: Option<Cmd> = None;
+    // Sessiya Host ishga tushishi bilan (Viewer so'ramasdan) ochiladi: ekran qulflanganda GNOME yangi
+    // sessiyani rad etadi, lekin ochilgan sessiya qulfda ham ishlaydi. Ochilmasa (masalan, ekran qulflangan)
+    // foydalanuvchi ruxsatni rad etmaguncha qayta uriniladi.
+    let mut eager = true;
+    let mut backoff = 3u64;
+    let mut first: Option<Cmd> = None;
     loop {
-        let first = match pending.take() {
-            Some(c) => c,
-            None => match rx.recv().await {
-                Some(c) => c,
+        if first.is_none() && !eager {
+            match rx.recv().await {
+                Some(c @ Cmd::OpenStream(..)) => first = Some(c),
+                Some(_) => continue, // sessiya yo'q: kiritish hodisasi e'tiborsiz qoldiriladi
                 None => return,
-            },
-        };
-
-        if matches!(first, Cmd::Input(_) | Cmd::SetPhysical(..)) {
-            continue; // sessiya yo'q: kiritish hodisasi e'tiborsiz qoldiriladi
+            }
         }
 
         let setup = async {
@@ -170,18 +171,35 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("[portal] sessiyani ochib bo'lmadi: {e:#}");
-                if let Cmd::OpenStream(_, reply) = first {
+                // Foydalanuvchi ruxsatni rad etgan: o'zi so'ramaguncha qayta so'ramaymiz
+                let denied = matches!(e.downcast_ref::<ashpd::Error>(), Some(ashpd::Error::Response(_)));
+                if let Some(Cmd::OpenStream(_, reply)) = first.take() {
                     let _ = reply.send(Err(e));
+                }
+                if denied {
+                    eager = false;
+                } else if eager {
+                    tokio::select! {
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(backoff)) => {}
+                        c = rx.recv() => match c {
+                            Some(c @ Cmd::OpenStream(..)) => first = Some(c),
+                            Some(_) => {}
+                            None => return,
+                        },
+                    }
+                    backoff = (backoff * 2).min(30);
                 }
                 continue;
             }
         };
+        eager = true;
+        backoff = 3;
         eprintln!("[portal] sessiya ochildi, monitorlar: {}", mons.len());
         for (i, m) in mons.iter().enumerate() {
             eprintln!("[portal]   monitor {i}: {}x{} @ ({}, {}), node {}", m.w, m.h, m.x, m.y, m.node_id);
         }
 
-        let mut next = Some(first);
+        let mut next = first.take();
         let mut cur = mons[0];
         let mut dbg_last: Option<std::time::Instant> = None;
         let mut phys: Option<(i32, i32)> = None;
