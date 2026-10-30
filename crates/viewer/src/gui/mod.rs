@@ -8,8 +8,9 @@ mod hosts;
 mod input;
 mod keys;
 mod session;
+mod theme;
 
-use egui::{Align, Align2, Color32, Key, Layout, RichText, TextureHandle, TextureOptions, ViewportCommand};
+use egui::{Align, Align2, Color32, Key, Layout, RichText, Sense, TextureHandle, TextureOptions, ViewportCommand};
 use hosts::SavedHost;
 use rdcore::client::Transport;
 use std::{
@@ -21,8 +22,8 @@ pub fn run() -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Remote Desktop")
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([640.0, 420.0]),
+            .with_inner_size([1100.0, 720.0])
+            .with_min_inner_size([760.0, 520.0]),
         ..Default::default()
     };
     eframe::run_native("Remote Desktop", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
@@ -31,11 +32,11 @@ pub fn run() -> anyhow::Result<()> {
 
 /// Sifat shablonlari: (nom, fps, kbps, balandlik; 0 = asl o'lcham)
 const PRESETS: [(&str, u16, u32, u16); 5] = [
-    ("Past (720p, 15 FPS)", 15, 2500, 720),
-    ("O'rta (1080p, 30 FPS)", 30, 8000, 1080),
-    ("Yuqori (1080p, 30 FPS)", 30, 15000, 1080),
-    ("Matn uchun (1440p, 20 FPS)", 20, 20_000, 1440),
-    ("Maksimal (asl o'lcham)", 30, 40_000, 0),
+    ("Past · 720p/15", 15, 2500, 720),
+    ("O'rta · 1080p/30", 30, 8000, 1080),
+    ("Yuqori · 1080p/30", 30, 15000, 1080),
+    ("Matn · 1440p/20", 20, 20_000, 1440),
+    ("Maksimal · asl", 30, 40_000, 0),
 ];
 const HEIGHTS: [(u16, &str); 5] = [(720, "720p"), (1080, "1080p"), (1440, "1440p"), (2160, "2160p"), (0, "Asl o'lcham")];
 
@@ -94,7 +95,7 @@ struct App {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        theme::apply(&cc.egui_ctx);
         let hosts = hosts::load();
         let mut app = App {
             tab: Tab::Connect,
@@ -270,140 +271,216 @@ impl App {
     }
 
     fn ui_form(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
+        let (host_on, host_label) = self.host.header_status();
+        egui::TopBottomPanel::top("header").frame(theme::header_frame()).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::Connect, "Ulanish");
-                ui.selectable_value(&mut self.tab, Tab::ThisPc, "Bu kompyuter");
+                theme::dot(ui, theme::ACCENT);
+                ui.label(RichText::new("Remote Desktop").size(16.0).strong());
+                ui.add_space(14.0);
+                if theme::tab(ui, self.tab == Tab::Connect, "Ulanish").clicked() {
+                    self.tab = Tab::Connect;
+                }
+                if theme::tab(ui, self.tab == Tab::ThisPc, "Bu kompyuter").clicked() {
+                    self.tab = Tab::ThisPc;
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    theme::chip(ui, host_label, if host_on { theme::GOOD } else { theme::DIM });
+                });
             });
         });
         if self.tab == Tab::ThisPc {
-            egui::CentralPanel::default().show(ctx, |ui| self.host.ui(ui));
+            egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| self.host.ui(ui));
             return;
         }
-        let mut do_connect = false;
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(8.0);
-            ui.heading("Remote Desktop");
-            ui.add_space(8.0);
-            ui.columns(2, |cols| {
-                // --- Saqlangan Host'lar
-                let ui = &mut cols[0];
-                ui.label(RichText::new("Saqlangan Host'lar").strong());
-                ui.add_space(4.0);
-                let mut select = None;
-                let mut connect_idx = None;
-                egui::ScrollArea::vertical().max_height(ui.available_height() - 40.0).show(ui, |ui| {
-                    if self.hosts.is_empty() {
-                        ui.weak("Hozircha yo'q. Muvaffaqiyatli ulanishdan keyin shu yerda paydo bo'ladi.");
-                    }
-                    for (i, h) in self.hosts.iter().enumerate() {
-                        let text = format!("{}\n{}", h.name, h.addr);
-                        let r = ui.selectable_label(self.selected == Some(i), text);
-                        if r.clicked() {
-                            select = Some(i);
-                        }
-                        if r.double_clicked() {
-                            connect_idx = Some(i);
-                        }
-                    }
-                });
-                if let Some(i) = select.or(connect_idx) {
-                    self.select(i);
-                }
-                if connect_idx.is_some() && !self.form.password.is_empty() {
-                    do_connect = true;
-                }
-                if let Some(i) = self.selected {
-                    if ui.button("Ro'yxatdan o'chirish").clicked() {
-                        self.hosts.remove(i);
-                        self.selected = None;
-                        let _ = hosts::save(&self.hosts);
-                    }
-                }
 
-                // --- Ulanish formasi
-                let ui = &mut cols[1];
-                ui.label(RichText::new("Ulanish").strong());
-                ui.add_space(4.0);
+        let mut do_connect = false;
+        let mut select: Option<usize> = None;
+        let mut connect_idx: Option<usize> = None;
+        let mut delete: Option<usize> = None;
+        let mut new_conn = false;
+
+        // --- Saqlangan Host'lar (chap panel)
+        egui::SidePanel::left("hosts").exact_width(250.0).resizable(false).frame(theme::side_frame()).show(ctx, |ui| {
+            ui.label(RichText::new("SAQLANGAN HOST'LAR").size(11.0).color(theme::DIM).strong());
+            ui.add_space(6.0);
+            let list_h = (ui.available_height() - 50.0).max(40.0);
+            egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
+                if self.hosts.is_empty() {
+                    ui.label(
+                        RichText::new("Hozircha yo'q. Muvaffaqiyatli ulanishdan keyin shu yerda paydo bo'ladi.")
+                            .size(12.5)
+                            .color(theme::DIM),
+                    );
+                }
+                for (i, h) in self.hosts.iter().enumerate() {
+                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 50.0), Sense::click());
+                    let selected = self.selected == Some(i);
+                    let fill = if selected {
+                        theme::ACCENT.gamma_multiply(0.22)
+                    } else if resp.hovered() {
+                        theme::CARD
+                    } else {
+                        Color32::TRANSPARENT
+                    };
+                    let stroke = if selected { egui::Stroke::new(1.0, theme::ACCENT) } else { egui::Stroke::NONE };
+                    let p = ui.painter_at(rect);
+                    p.rect(rect, egui::Rounding::same(8.0), fill, stroke);
+                    p.text(rect.min + egui::vec2(12.0, 9.0), Align2::LEFT_TOP, &h.name, egui::FontId::proportional(14.0), theme::TEXT);
+                    p.text(rect.min + egui::vec2(12.0, 29.0), Align2::LEFT_TOP, &h.addr, egui::FontId::monospace(11.5), theme::DIM);
+                    let x_rect = egui::Rect::from_center_size(egui::pos2(rect.right() - 16.0, rect.center().y), egui::vec2(24.0, 24.0));
+                    let xr = ui.interact(x_rect, ui.id().with(("del", i)), Sense::click());
+                    if resp.hovered() || xr.hovered() {
+                        let c = if xr.hovered() { theme::BAD } else { theme::DIM };
+                        p.text(x_rect.center(), Align2::CENTER_CENTER, "×", egui::FontId::proportional(17.0), c);
+                    }
+                    if xr.clicked() {
+                        delete = Some(i);
+                    } else if resp.double_clicked() {
+                        connect_idx = Some(i);
+                    } else if resp.clicked() {
+                        select = Some(i);
+                    }
+                    ui.add_space(3.0);
+                }
+            });
+            ui.add_space(4.0);
+            if ui.add_sized([ui.available_width(), 34.0], egui::Button::new("+  Yangi ulanish")).clicked() {
+                new_conn = true;
+            }
+        });
+
+        // --- Ulanish formasi
+        egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                ui.set_max_width(620.0);
+                let title = match self.selected.and_then(|i| self.hosts.get(i)) {
+                    Some(h) => h.name.clone(),
+                    None => "Yangi ulanish".to_string(),
+                };
+                ui.label(RichText::new(title).size(20.0).strong());
+                theme::hint(ui, "Host manzili va parolini kiriting. Parol hech qayerda saqlanmaydi.");
+                ui.add_space(12.0);
+
                 let mut pw_enter = false;
-                egui::Grid::new("form").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                    ui.label("Nom");
-                    ui.add(egui::TextEdit::singleline(&mut self.form.name).hint_text("masalan: Ofis Ubuntu"));
-                    ui.end_row();
-                    ui.label("Manzil");
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut self.form.addr).desired_width(170.0).hint_text("IP yoki nom"));
-                        ui.label("Port");
-                        ui.add(egui::TextEdit::singleline(&mut self.form.port).desired_width(60.0));
+                theme::card(ui, Some("HOST"), |ui| {
+                    egui::Grid::new("form").num_columns(2).spacing([14.0, 10.0]).min_col_width(70.0).show(ui, |ui| {
+                        ui.label(theme::dim("Nom"));
+                        ui.add(egui::TextEdit::singleline(&mut self.form.name).desired_width(330.0).hint_text("masalan: Ofis Ubuntu"));
+                        ui.end_row();
+                        ui.label(theme::dim("Manzil"));
+                        ui.horizontal(|ui| {
+                            ui.add(egui::TextEdit::singleline(&mut self.form.addr).desired_width(220.0).hint_text("IP yoki nom"));
+                            ui.label(theme::dim("Port"));
+                            ui.add(egui::TextEdit::singleline(&mut self.form.port).desired_width(64.0));
+                        });
+                        ui.end_row();
+                        ui.label(theme::dim("Parol"));
+                        ui.horizontal(|ui| {
+                            let r = ui.add(
+                                egui::TextEdit::singleline(&mut self.form.password)
+                                    .password(!self.form.show_password)
+                                    .desired_width(240.0),
+                            );
+                            pw_enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                            let eye = if self.form.show_password { "Yashirish" } else { "Ko'rsatish" };
+                            if ui.small_button(eye).clicked() {
+                                self.form.show_password = !self.form.show_password;
+                            }
+                        });
+                        ui.end_row();
                     });
-                    ui.end_row();
-                    ui.label("Ulanish turi");
+                });
+
+                theme::card(ui, Some("ULANISH VA SIFAT"), |ui| {
                     let tname = |t: Transport| match t {
-                        Transport::Auto => "Avto (UDP, bo'lmasa TCP)",
+                        Transport::Auto => "Avto",
                         Transport::Udp => "UDP",
                         Transport::Tcp => "TCP",
                     };
-                    egui::ComboBox::from_id_salt("transport").selected_text(tname(self.form.transport)).show_ui(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(theme::dim("Transport"));
                         for t in [Transport::Auto, Transport::Udp, Transport::Tcp] {
                             ui.selectable_value(&mut self.form.transport, t, tname(t));
                         }
                     });
-                    ui.end_row();
-                    ui.label("Parol");
-                    ui.horizontal(|ui| {
-                        let r = ui.add(
-                            egui::TextEdit::singleline(&mut self.form.password).password(!self.form.show_password),
-                        );
-                        pw_enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                        ui.checkbox(&mut self.form.show_password, "Ko'rsatish");
-                    });
-                    ui.end_row();
-
-                    ui.label("Sifat");
+                    theme::hint(
+                        ui,
+                        match self.form.transport {
+                            Transport::Auto => "Avval UDP (tez), bo'lmasa TCP orqali ulanadi.",
+                            Transport::Udp => "Eng tez; UDP bloklangan tarmoqlarda ishlamaydi.",
+                            Transport::Tcp => "UDP bloklangan tarmoqlar uchun; biroz sekinroq.",
+                        },
+                    );
+                    ui.add_space(8.0);
+                    ui.label(theme::dim("Sifat"));
                     let current = PRESETS
                         .iter()
                         .find(|p| p.1 == self.form.fps && p.2 == self.form.kbps && p.3 == self.form.height)
-                        .map(|p| p.0)
-                        .unwrap_or("Boshqa");
-                    egui::ComboBox::from_id_salt("preset").selected_text(current).show_ui(ui, |ui| {
+                        .map(|p| p.0);
+                    ui.horizontal_wrapped(|ui| {
                         for p in PRESETS {
-                            if ui.selectable_label(current == p.0, p.0).clicked() {
+                            if ui.selectable_label(current == Some(p.0), p.0).clicked() {
                                 self.form.fps = p.1;
                                 self.form.kbps = p.2;
                                 self.form.height = p.3;
                             }
                         }
                     });
-                    ui.end_row();
-                    ui.label("FPS");
-                    ui.add(egui::Slider::new(&mut self.form.fps, 5..=60));
-                    ui.end_row();
-                    ui.label("Bitrate");
-                    ui.add(egui::Slider::new(&mut self.form.kbps, 500..=50_000).logarithmic(true).suffix(" kbit/s"));
-                    ui.end_row();
-                    ui.label("O'lcham");
-                    let hname = HEIGHTS.iter().find(|h| h.0 == self.form.height).map(|h| h.1).unwrap_or("Boshqa");
-                    egui::ComboBox::from_id_salt("height").selected_text(hname).show_ui(ui, |ui| {
-                        for (v, n) in HEIGHTS {
-                            ui.selectable_value(&mut self.form.height, v, n);
-                        }
+                    egui::CollapsingHeader::new("Qo'shimcha sozlamalar").default_open(false).show(ui, |ui| {
+                        egui::Grid::new("quality").num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
+                            ui.label(theme::dim("FPS"));
+                            ui.add(egui::Slider::new(&mut self.form.fps, 5..=60));
+                            ui.end_row();
+                            ui.label(theme::dim("Bitrate"));
+                            ui.add(egui::Slider::new(&mut self.form.kbps, 500..=50_000).logarithmic(true).suffix(" kbit/s"));
+                            ui.end_row();
+                            ui.label(theme::dim("O'lcham"));
+                            let hname = HEIGHTS.iter().find(|h| h.0 == self.form.height).map(|h| h.1).unwrap_or("Boshqa");
+                            egui::ComboBox::from_id_salt("height").selected_text(hname).show_ui(ui, |ui| {
+                                for (v, n) in HEIGHTS {
+                                    ui.selectable_value(&mut self.form.height, v, n);
+                                }
+                            });
+                            ui.end_row();
+                        });
                     });
-                    ui.end_row();
+                    ui.add_space(8.0);
+                    ui.checkbox(&mut self.form.input, "Sichqoncha va klaviatura bilan boshqarish");
+                    ui.checkbox(&mut self.form.save, "Ro'yxatga saqlash");
                 });
-                ui.add_space(6.0);
-                ui.checkbox(&mut self.form.input, "Sichqoncha va klaviatura bilan boshqarish");
-                ui.checkbox(&mut self.form.save, "Ro'yxatga saqlash (parol saqlanmaydi)");
-                ui.add_space(10.0);
-                let can = !self.form.addr.trim().is_empty() && !self.form.password.is_empty();
-                if ui.add_enabled(can, egui::Button::new(RichText::new("  Ulanish  ").strong())).clicked() || (pw_enter && can) {
-                    do_connect = true;
-                }
+
                 if let Some(e) = &self.error {
+                    theme::error_banner(ui, e);
                     ui.add_space(10.0);
-                    ui.colored_label(Color32::from_rgb(235, 110, 100), e);
+                }
+                let can = !self.form.addr.trim().is_empty() && !self.form.password.is_empty();
+                if theme::primary_button(ui, "Ulanish", can).clicked() || (pw_enter && can) {
+                    do_connect = true;
                 }
             });
         });
+
+        if let Some(i) = delete {
+            if i < self.hosts.len() {
+                self.hosts.remove(i);
+                self.selected = None;
+                let _ = hosts::save(&self.hosts);
+            }
+        }
+        if let Some(i) = select.or(connect_idx) {
+            self.select(i);
+        }
+        if connect_idx.is_some() && !self.form.password.is_empty() {
+            do_connect = true;
+        }
+        if new_conn {
+            self.selected = None;
+            self.form.name.clear();
+            self.form.addr.clear();
+            self.form.password.clear();
+            self.form.port = protocol::DEFAULT_PORT.to_string();
+            self.error = None;
+        }
         if do_connect {
             self.connect(ctx);
         }
@@ -411,15 +488,16 @@ impl App {
 
     fn ui_connecting(&mut self, ctx: &egui::Context) {
         let mut cancel = false;
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                ui.add_space(ui.available_height() / 3.0);
-                ui.spinner();
-                ui.add_space(8.0);
+        egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space((ui.available_height() / 3.0).max(20.0));
+                ui.add(egui::Spinner::new().size(34.0).color(theme::ACCENT));
+                ui.add_space(12.0);
                 let what = if self.fingerprint.is_empty() { "Ulanilmoqda" } else { "Video kutilmoqda" };
-                ui.label(format!("{what}: {}", self.title));
-                ui.add_space(8.0);
-                cancel = ui.button("Bekor qilish").clicked();
+                ui.label(RichText::new(what).size(17.0).strong());
+                ui.label(theme::dim(&self.title));
+                ui.add_space(14.0);
+                cancel = ui.add(egui::Button::new("Bekor qilish").min_size(egui::vec2(140.0, 32.0))).clicked();
             });
         });
         if cancel {
@@ -436,19 +514,26 @@ impl App {
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.label("Bu Host'ga birinchi marta ulanyapsiz. Fingerprint'ni Host ekranidagi yoki");
-                ui.label("o'rnatishda ko'rsatilgan qiymat bilan solishtiring:");
+                ui.label("Bu Host'ga birinchi marta ulanyapsiz.");
+                theme::hint(ui, "Fingerprint'ni Host ekranidagi qiymat bilan solishtiring:");
                 ui.add_space(6.0);
                 let half = fp.len() / 2;
                 let split = fp[..half].rfind(':').map(|i| i + 1).unwrap_or(half);
-                ui.monospace(&fp[..split]);
-                ui.monospace(&fp[split..]);
-                ui.add_space(8.0);
+                egui::Frame::none()
+                    .fill(theme::BG)
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .rounding(egui::Rounding::same(8.0))
+                    .inner_margin(egui::Margin::same(10.0))
+                    .show(ui, |ui| {
+                        ui.monospace(&fp[..split]);
+                        ui.monospace(&fp[split..]);
+                    });
+                ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Ha, ishonaman").clicked() {
+                    if theme::accent_button(ui, "Ha, ishonaman", egui::vec2(140.0, 32.0), true).clicked() {
                         answer = Some(true);
                     }
-                    if ui.button("Yo'q").clicked() {
+                    if ui.add(egui::Button::new("Yo'q").min_size(egui::vec2(80.0, 32.0))).clicked() {
                         answer = Some(false);
                     }
                 });
@@ -482,20 +567,32 @@ impl App {
         let show_bar = !fullscreen || hover.map_or(false, |p| p.y < 40.0);
         let mut want_disconnect = false;
         if show_bar {
-            egui::TopBottomPanel::top("bar").show(ctx, |ui| {
+            let rtt_color = if rtt < 60.0 {
+                theme::GOOD
+            } else if rtt < 150.0 {
+                theme::WARN
+            } else {
+                theme::BAD
+            };
+            egui::TopBottomPanel::top("bar").frame(theme::bar_frame()).show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(&self.title).strong());
-                    ui.separator();
-                    ui.label(format!("{:.0} FPS   {:.0} kbit/s   {:.0} ms", self.stats.fps, self.stats.kbps, rtt));
+                    theme::dot(ui, theme::GOOD);
+                    ui.label(RichText::new(&self.title).size(13.5).strong());
+                    ui.add_space(6.0);
+                    theme::chip(ui, format!("{:.0} FPS", self.stats.fps), theme::DIM);
+                    theme::chip(ui, format!("{:.1} Mbit/s", self.stats.kbps / 1000.0), theme::DIM);
+                    theme::chip(ui, format!("{:.0} ms", rtt), rtt_color);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Uzish").clicked() {
+                        if theme::danger_button(ui, "Uzish").clicked() {
                             want_disconnect = true;
                         }
                         let fs_text = if fullscreen { "Oynaga qaytish" } else { "To'liq ekran" };
                         if ui.button(fs_text).clicked() {
                             ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!fullscreen));
                         }
-                        ui.checkbox(&mut self.input_on, "Boshqaruv");
+                        if ui.selectable_label(self.input_on, "Boshqaruv").clicked() {
+                            self.input_on = !self.input_on;
+                        }
                     });
                 });
             });

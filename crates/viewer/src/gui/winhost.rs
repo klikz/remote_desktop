@@ -2,7 +2,7 @@
 //! "Ulanishga ruxsat berish" holati `host.enabled` fayli bilan eslab qolinadi:
 //! dastur qayta ochilganda Host avtomatik yoqiladi.
 
-use egui::{Color32, RichText, Ui};
+use egui::{Color32, Ui};
 use host_windows::RunningHost;
 use rdcore::paths;
 use std::{os::windows::process::CommandExt, process::Command, time::Duration};
@@ -114,8 +114,6 @@ impl WinHost {
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
-        ui.label(RichText::new("Ulanishga ruxsat").strong());
-        ui.add_space(4.0);
         let mut on = self.host.is_some();
         let label = if on { "Ulanishga ruxsat berilgan" } else { "Ulanishga ruxsat berish" };
         if ui.checkbox(&mut on, label).changed() {

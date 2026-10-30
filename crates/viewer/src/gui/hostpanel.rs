@@ -3,7 +3,8 @@
 //! Parol faqat xesh (argon2 kalit) ko'rinishida saqlanadi, shuning uchun keyin ko'rsatib bo'lmaydi:
 //! o'rnatilgan parol faqat shu dastur ochiq turganda, ko'rsatish uchun xotirada saqlanadi.
 
-use egui::{Color32, RichText, Ui};
+use super::theme;
+use egui::{RichText, Ui};
 use rdcore::{
     auth::{self, Credentials, MIN_PASSWORD_LEN},
     cert::HostIdentity,
@@ -25,6 +26,8 @@ pub struct HostPanel {
     ip: String,
     #[cfg(windows)]
     win: super::winhost::WinHost,
+    #[cfg(target_os = "linux")]
+    svc: Option<(std::time::Instant, Option<String>)>,
 }
 
 fn local_ip() -> String {
@@ -80,6 +83,8 @@ impl HostPanel {
             ip: local_ip(),
             #[cfg(windows)]
             win: super::winhost::WinHost::new(),
+            #[cfg(target_os = "linux")]
+            svc: None,
         }
     }
 
@@ -159,139 +164,167 @@ impl HostPanel {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui) {
-        ui.add_space(8.0);
-        ui.heading("Bu kompyuter");
-        ui.label("Boshqa kompyuterlar shu manzil, port va parol bilan ulana oladi.");
-        ui.add_space(10.0);
-
-        egui::Grid::new("hostinfo").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-            ui.label("Holat");
-            #[cfg(target_os = "linux")]
-            {
-                match service_state().as_deref() {
-                    Some("active") => ui.colored_label(Color32::from_rgb(110, 200, 120), "Host ishlayapti (tinglamoqda)"),
-                    Some(other) => ui.colored_label(Color32::from_rgb(235, 170, 80), format!("Host xizmati: {other}")),
-                    None => ui.weak("Aniqlab bo'lmadi"),
-                };
-            }
-            #[cfg(windows)]
-            {
-                match self.win.port() {
-                    Some(_) => ui.colored_label(Color32::from_rgb(110, 200, 120), "Host ishlayapti (tinglamoqda)"),
-                    None => ui.weak("Host o'chiq: ulanishga ruxsat berilmagan"),
-                };
-            }
-            #[cfg(not(any(target_os = "linux", windows)))]
-            {
-                ui.weak("Bu platformada Host mavjud emas");
-            }
-            ui.end_row();
-
-            ui.label("Manzil");
-            ui.horizontal(|ui| {
-                let addr = format!("{}:{}", self.ip, paths::read_host_port().unwrap_or(protocol::DEFAULT_PORT));
-                ui.monospace(&addr);
-                if ui.small_button("Nusxa").clicked() {
-                    ui.ctx().output_mut(|o| o.copied_text = addr.clone());
-                }
-            });
-            ui.end_row();
-
-            ui.label("Fingerprint");
-            match &self.fingerprint {
-                Some(fp) => {
-                    let half = fp.len() / 2;
-                    let split = fp[..half].rfind(':').map(|i| i + 1).unwrap_or(half);
-                    ui.vertical(|ui| {
-                        ui.monospace(&fp[..split]);
-                        ui.monospace(&fp[split..]);
-                        if ui.small_button("Nusxa").clicked() {
-                            ui.ctx().output_mut(|o| o.copied_text = fp.clone());
-                        }
-                    });
-                }
-                None => {
-                    ui.weak("Hali yaratilmagan");
-                }
-            }
-            ui.end_row();
-
-            ui.label("Parol");
-            if Self::password_is_set() {
-                ui.colored_label(Color32::from_rgb(110, 200, 120), "o'rnatilgan");
-            } else {
-                ui.colored_label(Color32::from_rgb(235, 110, 100), "o'rnatilmagan: ulanishni hech kim qabul qila olmaydi");
-            }
-            ui.end_row();
-        });
-
-        ui.add_space(6.0);
-        ui.weak("Yangi Host'ga birinchi ulanishda Viewer shu fingerprint'ni ko'rsatadi: solishtirib tasdiqlang.");
-        ui.separator();
-
+    /// Yuqori paneldagi Host holati belgisi: (yoqilganmi, matn).
+    pub fn header_status(&mut self) -> (bool, String) {
         #[cfg(windows)]
         {
-            self.win.ui(ui);
-            ui.separator();
+            return match self.win.port() {
+                Some(p) => (true, format!("Host yoqilgan · {p}")),
+                None => (false, "Host o'chiq".to_string()),
+            };
         }
+        #[cfg(target_os = "linux")]
+        {
+            let on = self.service_state_cached().as_deref() == Some("active");
+            return (on, if on { "Host yoqilgan".to_string() } else { "Host o'chiq".to_string() });
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        {
+            (false, "Host mavjud emas".to_string())
+        }
+    }
 
-        ui.label(RichText::new("Port (UDP)").strong());
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.port_text).desired_width(80.0));
-            if ui.button("Saqlash").clicked() {
-                self.save_port();
-            }
-            if ui.button(format!("Standart ({})", protocol::DEFAULT_PORT)).clicked() {
-                self.port_text = protocol::DEFAULT_PORT.to_string();
-            }
-        });
-        if let Some((ok, text)) = &self.port_msg {
-            let color = if *ok { Color32::from_rgb(110, 200, 120) } else { Color32::from_rgb(235, 110, 100) };
-            ui.colored_label(color, text);
+    #[cfg(target_os = "linux")]
+    fn service_state_cached(&mut self) -> Option<String> {
+        let stale = self.svc.as_ref().map_or(true, |(t, _)| t.elapsed() > std::time::Duration::from_secs(3));
+        if stale {
+            self.svc = Some((std::time::Instant::now(), service_state()));
         }
-        ui.separator();
+        self.svc.as_ref().and_then(|(_, s)| s.clone())
+    }
 
-        ui.label(RichText::new("Parolni o'rnatish yoki o'zgartirish").strong());
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.new_password)
-                    .password(!self.show_new)
-                    .hint_text(format!("kamida {MIN_PASSWORD_LEN} belgi")),
-            );
-            ui.checkbox(&mut self.show_new, "Ko'rsatish");
-            if ui.button("Tasodifiy yaratish").clicked() {
-                self.new_password = random_password();
-                self.show_new = true;
-            }
-        });
-        ui.add_space(4.0);
-        let ok_len = self.new_password.chars().count() >= MIN_PASSWORD_LEN;
-        if ui.add_enabled(ok_len, egui::Button::new("Saqlash")).clicked() {
-            self.save_password();
-        }
-        if let Some((ok, text)) = &self.message {
-            ui.add_space(6.0);
-            let color = if *ok { Color32::from_rgb(110, 200, 120) } else { Color32::from_rgb(235, 110, 100) };
-            ui.colored_label(color, text);
-        }
-        if let Some(last) = self.last_set.clone() {
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label("Oxirgi o'rnatilgan parol:");
-                if self.show_last {
-                    ui.monospace(&last);
-                } else {
-                    ui.monospace("••••••••");
-                }
-                ui.checkbox(&mut self.show_last, "Ko'rsatish");
-                if ui.small_button("Nusxa").clicked() {
-                    ui.ctx().output_mut(|o| o.copied_text = last.clone());
+    pub fn ui(&mut self, ui: &mut Ui) {
+        #[cfg(target_os = "linux")]
+        let svc = self.service_state_cached();
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui.set_max_width(640.0);
+            ui.label(RichText::new("Bu kompyuter").size(20.0).strong());
+            theme::hint(ui, "Boshqa kompyuterlar shu manzil, port va parol bilan ulana oladi.");
+            ui.add_space(12.0);
+
+            theme::card(ui, Some("HOLAT"), |ui| {
+                ui.horizontal(|ui| {
+                    #[cfg(target_os = "linux")]
+                    {
+                        match svc.as_deref() {
+                            Some("active") => theme::chip(ui, "Host ishlayapti", theme::GOOD),
+                            Some(other) => theme::chip(ui, format!("Host xizmati: {other}"), theme::WARN),
+                            None => theme::chip(ui, "Aniqlab bo'lmadi", theme::DIM),
+                        }
+                    }
+                    #[cfg(windows)]
+                    {
+                        match self.win.port() {
+                            Some(_) => theme::chip(ui, "Host ishlayapti", theme::GOOD),
+                            None => theme::chip(ui, "Host o'chiq", theme::DIM),
+                        }
+                    }
+                    #[cfg(not(any(target_os = "linux", windows)))]
+                    {
+                        theme::chip(ui, "Host mavjud emas", theme::DIM);
+                    }
+                    if Self::password_is_set() {
+                        theme::chip(ui, "Parol o'rnatilgan", theme::GOOD);
+                    } else {
+                        theme::chip(ui, "Parol o'rnatilmagan", theme::BAD);
+                    }
+                });
+                ui.add_space(8.0);
+                let addr = format!("{}:{}", self.ip, paths::read_host_port().unwrap_or(protocol::DEFAULT_PORT));
+                ui.horizontal(|ui| {
+                    ui.label(theme::dim("Manzil"));
+                    ui.label(RichText::new(&addr).monospace().size(16.0).strong());
+                    if ui.small_button("Nusxa").clicked() {
+                        ui.ctx().output_mut(|o| o.copied_text = addr.clone());
+                    }
+                });
+                match &self.fingerprint {
+                    Some(fp) => {
+                        let half = fp.len() / 2;
+                        let split = fp[..half].rfind(':').map(|i| i + 1).unwrap_or(half);
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label(theme::dim("Fingerprint"));
+                            if ui.small_button("Nusxa").clicked() {
+                                ui.ctx().output_mut(|o| o.copied_text = fp.clone());
+                            }
+                        });
+                        ui.label(RichText::new(&fp[..split]).monospace().size(11.5).color(theme::DIM));
+                        ui.label(RichText::new(&fp[split..]).monospace().size(11.5).color(theme::DIM));
+                        theme::hint(ui, "Yangi Host'ga birinchi ulanishda Viewer shu qiymatni ko'rsatadi: solishtirib tasdiqlang.");
+                    }
+                    None => {
+                        ui.label(theme::dim("Fingerprint hali yaratilmagan"));
+                    }
                 }
             });
-            ui.weak("Parol xavfsizlik uchun faqat xesh ko'rinishida saqlanadi. Bu yerda u dastur yopilguncha ko'rinadi.");
-        }
+
+            #[cfg(windows)]
+            theme::card(ui, Some("ULANISHGA RUXSAT"), |ui| {
+                self.win.ui(ui);
+            });
+
+            theme::card(ui, Some("PORT (UDP VA TCP)"), |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut self.port_text).desired_width(80.0));
+                    if ui.button("Saqlash").clicked() {
+                        self.save_port();
+                    }
+                    if ui.button(format!("Standart ({})", protocol::DEFAULT_PORT)).clicked() {
+                        self.port_text = protocol::DEFAULT_PORT.to_string();
+                    }
+                });
+                if let Some((ok, text)) = &self.port_msg {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(text).color(if *ok { theme::GOOD } else { theme::BAD }));
+                }
+            });
+
+            theme::card(ui, Some("PAROL"), |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.new_password)
+                            .password(!self.show_new)
+                            .desired_width(230.0)
+                            .hint_text(format!("kamida {MIN_PASSWORD_LEN} belgi")),
+                    );
+                    let eye = if self.show_new { "Yashirish" } else { "Ko'rsatish" };
+                    if ui.small_button(eye).clicked() {
+                        self.show_new = !self.show_new;
+                    }
+                    if ui.button("Tasodifiy").clicked() {
+                        self.new_password = random_password();
+                        self.show_new = true;
+                    }
+                });
+                ui.add_space(4.0);
+                let ok_len = self.new_password.chars().count() >= MIN_PASSWORD_LEN;
+                if theme::accent_button(ui, "Parolni saqlash", egui::vec2(150.0, 32.0), ok_len).clicked() {
+                    self.save_password();
+                }
+                if let Some((ok, text)) = &self.message {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(text).color(if *ok { theme::GOOD } else { theme::BAD }));
+                }
+                if let Some(last) = self.last_set.clone() {
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(theme::dim("Oxirgi o'rnatilgan"));
+                        if self.show_last {
+                            ui.monospace(&last);
+                        } else {
+                            ui.monospace("••••••••");
+                        }
+                        if ui.small_button(if self.show_last { "Yashirish" } else { "Ko'rsatish" }).clicked() {
+                            self.show_last = !self.show_last;
+                        }
+                        if ui.small_button("Nusxa").clicked() {
+                            ui.ctx().output_mut(|o| o.copied_text = last.clone());
+                        }
+                    });
+                    theme::hint(ui, "Parol faqat xesh ko'rinishida saqlanadi; bu yerda dastur yopilguncha ko'rinadi.");
+                }
+            });
+        });
     }
 }
