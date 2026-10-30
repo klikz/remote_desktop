@@ -216,3 +216,4 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-30 | TCP transport qo'shildi (UDP yo'liga tegilmasdan): tunnel, Host'da avtomatik, Viewer'da "Ulanish turi" tanlovi, CLI `--tcp/--udp`. Build kutilmoqda |
 | 2026-10-30 | Matn aniqligi: NVENC/VA/x264 uchun sifat sozlamalari (yaroqsiz bo'lsa avtomatik zaxira), "Matn uchun (1440p)" shabloni, Maksimal 40 Mbit/s. Sinov kutilmoqda |
 | 2026-10-30 | UI qayta dizayn: `theme.rs` (qorong'i zamonaviy mavzu, kartalar, chip'lar), chap panelda Host kartalari, ixcham forma, "Bu kompyuter" kartalari, yangi sessiya paneli. Build kutilmoqda |
+| 2026-10-30 | `scripts/build-noble.sh` + `docker/Dockerfile.noble`: Ubuntu 24.04 uchun tez, keshlanadigan build (image bir marta, cargo keshi volume'da) |
