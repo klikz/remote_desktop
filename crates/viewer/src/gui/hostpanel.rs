@@ -27,7 +27,9 @@ pub struct HostPanel {
     #[cfg(windows)]
     win: super::winhost::WinHost,
     #[cfg(target_os = "linux")]
-    svc: Option<(std::time::Instant, Option<String>)>,
+    svc: Option<(std::time::Instant, Option<String>, bool)>,
+    #[cfg(target_os = "linux")]
+    svc_msg: Option<(bool, String)>,
 }
 
 fn local_ip() -> String {
@@ -54,6 +56,15 @@ fn service_state() -> Option<String> {
         .output()
         .ok()?;
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn service_installed() -> bool {
+    std::process::Command::new("systemctl")
+        .args(["--user", "cat", "remote-desktop-host"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 #[cfg(target_os = "linux")]
@@ -85,6 +96,8 @@ impl HostPanel {
             win: super::winhost::WinHost::new(),
             #[cfg(target_os = "linux")]
             svc: None,
+            #[cfg(target_os = "linux")]
+            svc_msg: None,
         }
     }
 
@@ -186,16 +199,35 @@ impl HostPanel {
 
     #[cfg(target_os = "linux")]
     fn service_state_cached(&mut self) -> Option<String> {
-        let stale = self.svc.as_ref().map_or(true, |(t, _)| t.elapsed() > std::time::Duration::from_secs(3));
+        let stale = self.svc.as_ref().map_or(true, |(t, _, _)| t.elapsed() > std::time::Duration::from_secs(3));
         if stale {
-            self.svc = Some((std::time::Instant::now(), service_state()));
+            self.svc = Some((std::time::Instant::now(), service_state(), service_installed()));
         }
-        self.svc.as_ref().and_then(|(_, s)| s.clone())
+        self.svc.as_ref().and_then(|(_, s, _)| s.clone())
+    }
+
+    /// Host xizmatini yoqadi (ishga tushiradi va avtostartga qo'shadi) yoki o'chiradi.
+    #[cfg(target_os = "linux")]
+    fn set_service(&mut self, on: bool) {
+        let verb = if on { "enable" } else { "disable" };
+        let ok = std::process::Command::new("systemctl")
+            .args(["--user", verb, "--now", "remote-desktop-host"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        self.svc = None;
+        self.svc_msg = Some(if ok {
+            (true, if on { "Host yoqildi: ulanishlar qabul qilinadi.".into() } else { "Host o'chirildi.".into() })
+        } else {
+            (false, "Xizmatni boshqarib bo'lmadi. Terminalda: systemctl --user status remote-desktop-host".into())
+        });
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
         #[cfg(target_os = "linux")]
         let svc = self.service_state_cached();
+        #[cfg(target_os = "linux")]
+        let svc_installed = self.svc.as_ref().map_or(false, |s| s.2);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.set_max_width(640.0);
             ui.label(RichText::new("Bu kompyuter").size(20.0).strong());
@@ -262,6 +294,25 @@ impl HostPanel {
             #[cfg(windows)]
             theme::card(ui, Some("ULANISHGA RUXSAT"), |ui| {
                 self.win.ui(ui);
+            });
+
+            #[cfg(target_os = "linux")]
+            theme::card(ui, Some("ULANISHGA RUXSAT"), |ui| {
+                if !svc_installed {
+                    ui.label(RichText::new("Host xizmati o'rnatilmagan.").color(theme::WARN));
+                    theme::hint(ui, "Terminalda loyiha papkasida ishga tushiring: bash ./scripts/install-host.sh");
+                } else {
+                    let mut on = matches!(svc.as_deref(), Some("active") | Some("activating"));
+                    let label = if on { "Ulanishga ruxsat berilgan" } else { "Ulanishga ruxsat berish" };
+                    if ui.checkbox(&mut on, label).changed() {
+                        self.set_service(on);
+                    }
+                    theme::hint(ui, "Yoqilsa, Host kompyuter ishga tushganda ham o'zi yonadi.");
+                }
+                if let Some((ok, text)) = &self.svc_msg {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(text).color(if *ok { theme::GOOD } else { theme::BAD }));
+                }
             });
 
             theme::card(ui, Some("PORT (UDP VA TCP)"), |ui| {
