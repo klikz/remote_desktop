@@ -37,7 +37,7 @@ struct Mon {
 enum Cmd {
     OpenStream(usize, oneshot::Sender<Result<StreamInfo>>),
     Input(InputEvent),
-    SetSpace(i32, i32),
+    SetPhysical(i32, i32),
 }
 
 #[derive(Clone)]
@@ -62,10 +62,9 @@ impl PortalHandle {
         }
     }
 
-    /// Sichqoncha koordinatalari fazosini qo'lda belgilaydi (boshqa kompozitorlar uchun zaxira).
-    #[allow(dead_code)]
-    pub async fn set_pointer_space(&self, w: i32, h: i32) {
-        let _ = self.tx.send(Cmd::SetSpace(w, h)).await;
+    /// Oqimning haqiqiy kadr o'lchami (piksel). Logik o'lchamdan katta bo'lsa, ekran masshtabli.
+    pub async fn set_physical_size(&self, w: i32, h: i32) {
+        let _ = self.tx.send(Cmd::SetPhysical(w, h)).await;
     }
 
     /// Ekran oqimi uchun PipeWire ulanishini so'raydi (kerak bo'lsa sessiyani ochadi).
@@ -105,7 +104,7 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             },
         };
 
-        if matches!(first, Cmd::Input(_) | Cmd::SetSpace(..)) {
+        if matches!(first, Cmd::Input(_) | Cmd::SetPhysical(..)) {
             continue; // sessiya yo'q: kiritish hodisasi e'tiborsiz qoldiriladi
         }
 
@@ -185,6 +184,7 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
         let mut next = Some(first);
         let mut cur = mons[0];
         let mut dbg_last: Option<std::time::Instant> = None;
+        let mut phys: Option<(i32, i32)> = None;
         loop {
             let cmd = match next.take() {
                 Some(c) => c,
@@ -200,18 +200,32 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                 Cmd::Input(ev) => {
                     match ev {
                         InputEvent::PointerMove { x, y } => {
-                            let px = f64::from(x) / 65535.0 * f64::from(cur.w.max(1));
-                            let py = f64::from(y) / 65535.0 * f64::from(cur.h.max(1));
-                            let r = rd.notify_pointer_motion_absolute(&session, cur.node_id, px, py).await;
+                            // Maqsad: logik koordinata (portal bergan o'lcham).
+                            let (lw, lh) = (f64::from(cur.w.max(1)), f64::from(cur.h.max(1)));
+                            let (tx, ty) = (f64::from(x) / 65535.0 * lw, f64::from(y) / 65535.0 * lh);
+                            // GNOME mutlaq qiymatni 0..logik oraliqda qabul qiladi, lekin masshtabga (s = fizik/logik)
+                            // bo'lib qo'llaydi. Shuning uchun s ga ko'paytirib yuboramiz; oraliqdan chiqadigan qismni
+                            // (ekranning o'ng/pastki chekkasi) nisbiy siljish bilan qo'shamiz.
+                            let (sx, sy) = match phys {
+                                Some((pw, ph)) if pw > cur.w && ph > cur.h => (f64::from(pw) / lw, f64::from(ph) / lh),
+                                _ => (1.0, 1.0),
+                            };
+                            let ax = (tx * sx).clamp(0.0, lw - 1.0);
+                            let ay = (ty * sy).clamp(0.0, lh - 1.0);
+                            let (px, py) = (ax, ay);
+                            let mut r = rd.notify_pointer_motion_absolute(&session, cur.node_id, ax, ay).await;
+                            let (rx, ry) = (tx - ax / sx, ty - ay / sy);
+                            if r.is_ok() && (rx > 0.5 || ry > 0.5) {
+                                r = rd.notify_pointer_motion(&session, rx.max(0.0), ry.max(0.0)).await;
+                            }
                             if std::env::var_os("RD_DEBUG").is_some()
                                 && dbg_last.map_or(true, |t: std::time::Instant| t.elapsed().as_millis() >= 500)
                             {
                                 dbg_last = Some(std::time::Instant::now());
                                 eprintln!(
-                                    "[dbg] viewer=({x},{y}) /65535 -> ubuntu=({px:.0},{py:.0}) fazo {}x{} node {} natija {:?}",
+                                    "[dbg] viewer=({x},{y}) maqsad=({tx:.0},{ty:.0}) mutlaq=({px:.0},{py:.0}) nisbiy=({rx:.0},{ry:.0}) logik {}x{} masshtab {sx:.3} natija {:?}",
                                     cur.w,
                                     cur.h,
-                                    cur.node_id,
                                     r.as_ref().map(|_| "ok").map_err(|e| e.to_string())
                                 );
                             }
@@ -240,12 +254,14 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                     }
                     continue;
                 }
-                Cmd::SetSpace(w, h) => {
-                    if std::env::var_os("RD_POINTER_SIZE").is_none() && w > 0 && h > 0 {
-                        cur.w = w;
-                        cur.h = h;
-                        eprintln!("[portal] kiritish koordinata fazosi: {w}x{h}");
-                    }
+                Cmd::SetPhysical(w, h) => {
+                    phys = Some((w, h));
+                    eprintln!(
+                        "[portal] kadr {w}x{h}, logik {}x{}: masshtab {:.3}",
+                        cur.w,
+                        cur.h,
+                        f64::from(w) / f64::from(cur.w.max(1))
+                    );
                     continue;
                 }
                 Cmd::OpenStream(w, r) => (w, r),
