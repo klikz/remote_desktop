@@ -151,9 +151,15 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             let devices = started.devices();
             eprintln!("[portal] ruxsat etilgan qurilmalar: {devices:?}");
             if !devices.contains(DeviceType::Pointer) || !devices.contains(DeviceType::Keyboard) {
-                // Eski ruxsatda boshqarish berilmagan: token o'chiriladi, keyingi safar GNOME qayta so'raydi
-                eprintln!("[portal] OGOHLANTIRISH: sichqoncha/klaviatura ruxsati yo'q; ruxsat qayta so'raladi");
-                let _ = std::fs::remove_file(&token_path);
+                if saved.is_some() {
+                    // Eski ruxsatda faqat ekran berilgan edi: token o'chiriladi va sessiya darhol qayta ochiladi,
+                    // shunda GNOME boshqarish ruxsatini ham so'raydi.
+                    eprintln!("[portal] sichqoncha/klaviatura ruxsati yo'q: saqlangan ruxsat bekor qilinib, qayta so'raladi");
+                    let _ = std::fs::remove_file(&token_path);
+                    let _ = session.close().await;
+                    return Err(anyhow::Error::new(NoControl));
+                }
+                eprintln!("[portal] OGOHLANTIRISH: boshqarish ruxsati berilmadi; faqat ko'rish ishlaydi (dialogda \"Boshqarish\" ni yoqing)");
             }
             let mut mons: Vec<Mon> = started
                 .streams()
@@ -179,6 +185,9 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             Err(e) => {
                 eprintln!("[portal] sessiyani ochib bo'lmadi: {e:#}");
                 // Foydalanuvchi ruxsatni rad etgan: o'zi so'ramaguncha qayta so'ramaymiz
+                if e.downcast_ref::<NoControl>().is_some() {
+                    continue; // token o'chirilgan: darhol yangi sessiya (so'rov `first` da saqlanadi)
+                }
                 let denied = matches!(e.downcast_ref::<ashpd::Error>(), Some(ashpd::Error::Response(_)));
                 if let Some(Cmd::OpenStream(_, reply)) = first.take() {
                     let _ = reply.send(Err(e));
@@ -347,3 +356,15 @@ fn note_err<T, E: std::fmt::Display>(count: &mut u32, what: &str, r: &Result<T, 
         }
     }
 }
+
+/// Saqlangan ruxsatda boshqarish yo'q edi: sessiya yopildi, token o'chirildi, qayta ochish kerak.
+#[derive(Debug)]
+struct NoControl;
+
+impl std::fmt::Display for NoControl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("saqlangan ruxsatda boshqarish yo'q")
+    }
+}
+
+impl std::error::Error for NoControl {}
