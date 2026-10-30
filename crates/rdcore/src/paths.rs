@@ -15,6 +15,18 @@ pub fn host_password_file() -> Result<PathBuf> {
     Ok(config_dir()?.join("password.key"))
 }
 
+/// Host tinglaydigan port saqlanadigan fayl (bitta son).
+pub fn host_port_file() -> Result<PathBuf> {
+    Ok(config_dir()?.join("port"))
+}
+
+/// Saqlangan Host porti. Fayl yo'q yoki noto'g'ri bo'lsa `None` (standart port ishlatiladi).
+pub fn read_host_port() -> Option<u16> {
+    let text = std::fs::read_to_string(host_port_file().ok()?).ok()?;
+    let p: u16 = text.trim().parse().ok()?;
+    (p >= 1024).then_some(p)
+}
+
 /// Viewer ishonchli Host'lar ro'yxati.
 pub fn known_hosts_file() -> Result<PathBuf> {
     Ok(config_dir()?.join("known_hosts"))

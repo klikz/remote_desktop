@@ -71,7 +71,8 @@ case "${1:-install}" in
     echo "Parol:           $( [[ -f "$CONF/password.key" ]] && echo "o'rnatilgan" || echo "YO'Q")"
     echo "Service:         $(systemctl --user is-enabled remote-desktop-host 2>/dev/null || echo yo\'q) / $(systemctl --user is-active remote-desktop-host 2>/dev/null || true)"
     echo "Avtomatik kirish: $(autologin_status)"
-    echo "Port:            $(ss -ulpn 2>/dev/null | grep -q ':7777 ' && echo 'UDP 7777 tinglanmoqda' || echo 'tinglanmayapti')"
+    PORT="$(tr -d '[:space:]' <"$CONF/port" 2>/dev/null || true)"; PORT="${PORT:-7777}"
+    echo "Port:            $(ss -ulpn 2>/dev/null | grep -q ":$PORT " && echo "UDP $PORT tinglanmoqda" || echo "UDP $PORT tinglanmayapti")"
     echo
     bash scripts/ubuntu-host-setup.sh --status
     echo

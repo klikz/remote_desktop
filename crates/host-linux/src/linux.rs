@@ -26,7 +26,7 @@ Buyruqlar:
   host-linux set-password            Ulanish parolini o'rnatish (kamida 8 belgi)
   host-linux run [--bind IP] [--port PORT]
                                      Host'ni ishga tushirish
-                                     (standart: --bind 0.0.0.0 --port 7777)
+                                     (standart: --bind 0.0.0.0, port: UI'da saqlangan yoki 7777)
 
 Muhit o'zgaruvchisi: RD_ENCODER=x264enc|nvh264enc|vah264enc|openh264enc (kodlagichni majburlash)
 ";
@@ -58,7 +58,8 @@ fn set_password() -> Result<()> {
 
 async fn run_host(args: &[String]) -> Result<()> {
     let mut ip: IpAddr = "0.0.0.0".parse()?;
-    let mut port: u16 = DEFAULT_PORT;
+    // Ustuvorlik: --port > UI'da saqlangan port (`port` fayli) > standart 7777
+    let mut port: u16 = paths::read_host_port().unwrap_or(DEFAULT_PORT);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {

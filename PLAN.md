@@ -148,7 +148,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Test: haqiqiy internet orqali boshqa tarmoqdan ulanish
 
 ### Bosqich 7. UI va tayyorlash
-- [ ] Host UI (Linux): IP, port, parol, ulanish holati, uzish tugmasi
+- [~] Host UI: dasturdagi "Bu kompyuter" bo'limi: holat, manzil, fingerprint, parolni o'rnatish (ko'rsatish, tasodifiy yaratish, xizmatni qayta ishga tushirish). Ulangan Viewer'lar ro'yxati va uzish tugmasi hali yo'q
 - [ ] Host'da ulanish tasdig'i va doimiy indikator
 - [x] Viewer UI (Windows, egui): ulanish oynasi, saqlangan Host'lar (`hosts.txt`, parolsiz), sifat shablonlari, fingerprint tasdig'i oynasi, ulanish paneli (FPS/bitrate/RTT, to'liq ekran, boshqaruv, uzish). Sinovdan o'tdi
 - [ ] Windows: portable `.exe` va installer
@@ -208,3 +208,4 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-30 | Viewer GUI (egui/eframe 0.29) yozildi: argumentsiz ishga tushirilsa oyna ochiladi, `connect` CLI saqlandi. Build kutilmoqda |
 | 2026-10-30 | Viewer GUI sinovdan o'tdi: ro'yxatdan ulanish, to'liq ekran, boshqaruv, o'zbekcha belgilar ishladi |
 | 2026-10-30 | Linux Viewer boshlandi: `crates/viewer-windows` `crates/viewer` ga o'zgartirildi, eski minifb rejimi (`--view`) olib tashlandi, GUI yagona yo'l. Buyruq: `cargo run -p viewer` |
+| 2026-10-30 | Viewer parolini ko'rsatish belgisi; "Bu kompyuter" bo'limi (Host holati, manzil, fingerprint, parol o'rnatish) qo'shildi. Build kutilmoqda |

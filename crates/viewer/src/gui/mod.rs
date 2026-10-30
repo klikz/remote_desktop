@@ -1,6 +1,7 @@
 //! Viewer'ning oynali interfeysi (egui): ulanish oynasi, saqlangan Host'lar, sifat sozlamalari,
 //! fingerprint tasdig'i va ulanish ichidagi panel.
 
+mod hostpanel;
 mod hosts;
 mod input;
 mod keys;
@@ -34,6 +35,12 @@ const PRESETS: [(&str, u16, u32, u16); 4] = [
 ];
 const HEIGHTS: [(u16, &str); 5] = [(720, "720p"), (1080, "1080p"), (1440, "1440p"), (2160, "2160p"), (0, "Asl o'lcham")];
 
+#[derive(PartialEq, Clone, Copy)]
+enum Tab {
+    Connect,
+    ThisPc,
+}
+
 #[derive(PartialEq)]
 enum Screen {
     Form,
@@ -45,6 +52,7 @@ struct Form {
     name: String,
     addr: String,
     password: String,
+    show_password: bool,
     fps: u16,
     kbps: u32,
     height: u16,
@@ -61,6 +69,8 @@ struct Stats {
 }
 
 struct App {
+    tab: Tab,
+    host: hostpanel::HostPanel,
     screen: Screen,
     hosts: Vec<SavedHost>,
     selected: Option<usize>,
@@ -81,6 +91,8 @@ impl App {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         let hosts = hosts::load();
         let mut app = App {
+            tab: Tab::Connect,
+            host: hostpanel::HostPanel::new(),
             screen: Screen::Form,
             hosts,
             selected: None,
@@ -88,6 +100,7 @@ impl App {
                 name: String::new(),
                 addr: String::new(),
                 password: String::new(),
+                show_password: false,
                 fps: 30,
                 kbps: 8000,
                 height: 1080,
@@ -220,6 +233,16 @@ impl App {
     }
 
     fn ui_form(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.tab, Tab::Connect, "Ulanish");
+                ui.selectable_value(&mut self.tab, Tab::ThisPc, "Bu kompyuter");
+            });
+        });
+        if self.tab == Tab::ThisPc {
+            egui::CentralPanel::default().show(ctx, |ui| self.host.ui(ui));
+            return;
+        }
         let mut do_connect = false;
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(8.0);
@@ -274,8 +297,13 @@ impl App {
                     ui.add(egui::TextEdit::singleline(&mut self.form.addr).hint_text("IP yoki IP:port"));
                     ui.end_row();
                     ui.label("Parol");
-                    let r = ui.add(egui::TextEdit::singleline(&mut self.form.password).password(true));
-                    pw_enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                    ui.horizontal(|ui| {
+                        let r = ui.add(
+                            egui::TextEdit::singleline(&mut self.form.password).password(!self.form.show_password),
+                        );
+                        pw_enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                        ui.checkbox(&mut self.form.show_password, "Ko'rsatish");
+                    });
                     ui.end_row();
 
                     ui.label("Sifat");
