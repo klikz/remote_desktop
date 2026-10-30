@@ -148,6 +148,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [ ] Test: haqiqiy internet orqali boshqa tarmoqdan ulanish
 
 ### Bosqich 7. UI va tayyorlash
+- [x] TCP zaxira transporti (`rdcore::tcp_tunnel`): QUIC paketlari TCP orqali tashiladi, mavjud UDP yo'li o'zgarmagan. Host bir port raqamida UDP+TCP tinglaydi (`RD_NO_TCP=1` bilan o'chiriladi). Viewer: Avto / UDP / TCP (build va sinov kutilmoqda)
 - [x] Host UI: "Bu kompyuter" bo'limi: holat, manzil, fingerprint, parol, port. Windows'da Host dastur ichida ishlaydi: "Ulanishga ruxsat berish" tugmasi, ulanganlar ro'yxati + "Uzish", Windows bilan avtostart (build kutilmoqda)
 - [ ] Host'da ulanish tasdig'i va doimiy indikator
 - [x] Viewer UI (Windows, egui): ulanish oynasi, saqlangan Host'lar (`hosts.txt`, parolsiz), sifat shablonlari, fingerprint tasdig'i oynasi, ulanish paneli (FPS/bitrate/RTT, to'liq ekran, boshqaruv, uzish). Sinovdan o'tdi
@@ -212,3 +213,4 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-30 | Windows Host yozildi (`crates/host-windows`): GDI ekran olish, openh264 kodlash, SendInput. Ubuntu Viewer -> Windows ulanishi uchun. Build kutilmoqda |
 | 2026-10-30 | Ikki tomonlama ulanish ishladi: Windows <-> Ubuntu (Viewer va Host ikkala tizimda). Keyingi: internet ulanishi va Host'ni UI'dan boshqarish |
 | 2026-10-30 | Windows Host dastur ichiga ko'chirildi: `host-windows` kutubxona (`RunningHost`), UI'da yoqish/o'chirish, ulanganlar + uzish, avtostart. Build kutilmoqda |
+| 2026-10-30 | TCP transport qo'shildi (UDP yo'liga tegilmasdan): tunnel, Host'da avtomatik, Viewer'da "Ulanish turi" tanlovi, CLI `--tcp/--udp`. Build kutilmoqda |
