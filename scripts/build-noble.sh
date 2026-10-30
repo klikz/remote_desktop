@@ -4,6 +4,7 @@
 # qayta yuklanmaydi, faqat o'zgargan kod kompilyatsiya qilinadi.
 #
 # Foydalanish:  bash scripts/build-noble.sh [paket]      (standart: viewer)
+#               bash scripts/build-noble.sh host-linux  (Linux Host: target-noble/release/host-linux)
 #               REBUILD_IMAGE=1 bash scripts/build-noble.sh   (build muhitini qayta yaratish)
 # Natija:       target-noble/release/<paket>
 set -euo pipefail

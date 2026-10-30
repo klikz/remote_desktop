@@ -300,7 +300,8 @@ impl HostPanel {
             theme::card(ui, Some("ULANISHGA RUXSAT"), |ui| {
                 if !svc_installed {
                     ui.label(RichText::new("Host xizmati o'rnatilmagan.").color(theme::WARN));
-                    theme::hint(ui, "Terminalda loyiha papkasida ishga tushiring: bash ./scripts/install-host.sh");
+                    theme::hint(ui, "Loyiha bilan: bash ./scripts/install-host.sh");
+                    theme::hint(ui, "Tayyor fayl bilan: bash install-host-binary.sh (host-linux fayli yonida)");
                 } else {
                     let mut on = matches!(svc.as_deref(), Some("active") | Some("activating"));
                     let label = if on { "Ulanishga ruxsat berilgan" } else { "Ulanishga ruxsat berish" };
