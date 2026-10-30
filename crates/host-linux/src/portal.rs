@@ -200,6 +200,9 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
         }
 
         let mut next = first.take();
+        // Sessiya aynan shu so'rov uchun ochilgan bo'lsa (yangi), xato bo'lsa qayta urinmaymiz. Ilgari
+        // (oldindan) ochilgan sessiya eskirgan bo'lishi mumkin: shunda yangisini ochib, so'rovni qaytaramiz.
+        let mut fresh = next.is_some();
         let mut cur = mons[0];
         let mut dbg_last: Option<std::time::Instant> = None;
         let mut phys: Option<(i32, i32)> = None;
@@ -298,6 +301,7 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             eprintln!("[portal] kiritish koordinata fazosi: {}x{}", cur.w, cur.h);
             match sc.open_pipe_wire_remote(&session).await {
                 Ok(fd) => {
+                    fresh = false;
                     let _ = reply.send(Ok(StreamInfo {
                         fd,
                         node_id: m.node_id,
@@ -309,7 +313,11 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                 }
                 Err(e) => {
                     eprintln!("[portal] sessiya yaroqsiz, qayta ochiladi: {e}");
-                    let _ = reply.send(Err(anyhow!("PipeWire ulanishini olib bo'lmadi: {e}")));
+                    if fresh {
+                        let _ = reply.send(Err(anyhow!("PipeWire ulanishini olib bo'lmadi: {e}")));
+                    } else {
+                        first = Some(Cmd::OpenStream(want, reply)); // yangi sessiyada shu so'rov qaytariladi
+                    }
                     break;
                 }
             }
