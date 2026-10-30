@@ -126,7 +126,7 @@ async fn run_connect(target: &str, opts: Options) -> Result<()> {
         opts.transport,
     )
     .await?;
-    println!("Ulandi{}. Host imkoniyatlari: {:?}", session.host_caps);
+    println!("Ulandi{}. Host imkoniyatlari: {:?}", if session.via_tcp { " (TCP orqali)" } else { "" }, session.host_caps);
 
     if opts.video_secs > 0 {
         receive_video(&mut session, &opts).await?;
