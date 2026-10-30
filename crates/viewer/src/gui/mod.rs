@@ -2,6 +2,8 @@
 //! fingerprint tasdig'i va ulanish ichidagi panel.
 
 mod hostpanel;
+#[cfg(windows)]
+mod winhost;
 mod hosts;
 mod input;
 mod keys;

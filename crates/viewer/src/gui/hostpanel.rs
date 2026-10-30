@@ -23,6 +23,8 @@ pub struct HostPanel {
     message: Option<(bool, String)>,
     fingerprint: Option<String>,
     ip: String,
+    #[cfg(windows)]
+    win: super::winhost::WinHost,
 }
 
 fn local_ip() -> String {
@@ -76,6 +78,8 @@ impl HostPanel {
             message: None,
             fingerprint,
             ip: local_ip(),
+            #[cfg(windows)]
+            win: super::winhost::WinHost::new(),
         }
     }
 
@@ -111,7 +115,9 @@ impl HostPanel {
                 } else {
                     " Host ishlamayapti: port keyingi ishga tushishda ishlatiladi."
                 };
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(windows)]
+                let note = if self.win.restart_if_running() { " Host qayta ishga tushirildi." } else { "" };
+                #[cfg(not(any(target_os = "linux", windows)))]
                 let note = "";
                 (
                     true,
@@ -143,8 +149,10 @@ impl HostPanel {
                 } else {
                     " Host xizmati ishlamayapti: parol keyingi ishga tushishda ishlatiladi."
                 };
-                #[cfg(not(target_os = "linux"))]
-                let note = " Host dasturi (Windows) hali mavjud emas, parol keyingi versiyada ishlatiladi.";
+                #[cfg(windows)]
+                let note = if self.win.restart_if_running() { " Host qayta ishga tushirildi." } else { " Host ishlamayapti: parol keyingi yoqilganda ishlatiladi." };
+                #[cfg(not(any(target_os = "linux", windows)))]
+                let note = "";
                 self.message = Some((true, format!("Parol saqlandi.{note}")));
             }
             Err(e) => self.message = Some((false, format!("{e:#}"))),
@@ -167,9 +175,16 @@ impl HostPanel {
                     None => ui.weak("Aniqlab bo'lmadi"),
                 };
             }
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(windows)]
             {
-                ui.weak("Windows Host hali yozilmagan (keyingi bosqich)");
+                match self.win.port() {
+                    Some(_) => ui.colored_label(Color32::from_rgb(110, 200, 120), "Host ishlayapti (tinglamoqda)"),
+                    None => ui.weak("Host o'chiq: ulanishga ruxsat berilmagan"),
+                };
+            }
+            #[cfg(not(any(target_os = "linux", windows)))]
+            {
+                ui.weak("Bu platformada Host mavjud emas");
             }
             ui.end_row();
 
@@ -214,6 +229,12 @@ impl HostPanel {
         ui.add_space(6.0);
         ui.weak("Yangi Host'ga birinchi ulanishda Viewer shu fingerprint'ni ko'rsatadi: solishtirib tasdiqlang.");
         ui.separator();
+
+        #[cfg(windows)]
+        {
+            self.win.ui(ui);
+            ui.separator();
+        }
 
         ui.label(RichText::new("Port (UDP)").strong());
         ui.add_space(4.0);

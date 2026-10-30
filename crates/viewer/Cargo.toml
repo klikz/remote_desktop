@@ -14,3 +14,6 @@ openh264 = "0.6"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 egui = "0.29"
 
+
+[target.'cfg(windows)'.dependencies]
+host-windows = { path = "../host-windows" }
