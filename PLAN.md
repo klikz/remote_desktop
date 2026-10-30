@@ -214,3 +214,4 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 | 2026-10-30 | Ikki tomonlama ulanish ishladi: Windows <-> Ubuntu (Viewer va Host ikkala tizimda). Keyingi: internet ulanishi va Host'ni UI'dan boshqarish |
 | 2026-10-30 | Windows Host dastur ichiga ko'chirildi: `host-windows` kutubxona (`RunningHost`), UI'da yoqish/o'chirish, ulanganlar + uzish, avtostart. Build kutilmoqda |
 | 2026-10-30 | TCP transport qo'shildi (UDP yo'liga tegilmasdan): tunnel, Host'da avtomatik, Viewer'da "Ulanish turi" tanlovi, CLI `--tcp/--udp`. Build kutilmoqda |
+| 2026-10-30 | Matn aniqligi: NVENC/VA/x264 uchun sifat sozlamalari (yaroqsiz bo'lsa avtomatik zaxira), "Matn uchun (1440p)" shabloni, Maksimal 40 Mbit/s. Sinov kutilmoqda |
