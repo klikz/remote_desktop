@@ -1520,6 +1520,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "host-windows"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "openh264",
+ "protocol",
+ "rdcore",
+ "rpassword",
+ "tokio",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "icu_collections"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
