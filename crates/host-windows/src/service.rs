@@ -81,6 +81,7 @@ async fn run_host(args: &[String]) -> Result<()> {
         }
     }
     let host = bind_host(ip, port)?;
+    let _tcp = host.spawn_tcp_tunnel();
     println!("Host ishga tushdi: {} (UDP)", host.local_addr()?);
     println!("Fingerprint: {}", hexfmt::colon(&host.fingerprint()));
     println!("Viewer birinchi ulanishda shu fingerprint'ni tasdiqlaydi. To'xtatish: Ctrl+C");
@@ -104,6 +105,7 @@ fn bind_host(ip: IpAddr, port: u16) -> Result<Host> {
 struct Peer {
     id: u64,
     ip: IpAddr,
+    via_tcp: bool,
     since: Instant,
     conn: rdcore::quinn::Connection,
 }
@@ -119,6 +121,8 @@ struct Shared {
 pub struct PeerInfo {
     pub id: u64,
     pub ip: IpAddr,
+    /// TCP tunnel orqali ulangan.
+    pub via_tcp: bool,
     pub since: Instant,
 }
 
@@ -154,6 +158,7 @@ impl RunningHost {
                         return;
                     }
                 };
+                let _tcp = host.spawn_tcp_tunnel();
                 let _ = ready_tx.send(Ok(hexfmt::colon(&host.fingerprint())));
                 tokio::select! {
                     r = host.run_with(make_handler(sh.clone())) => {
@@ -182,7 +187,7 @@ impl RunningHost {
     }
 
     pub fn peers(&self) -> Vec<PeerInfo> {
-        self.shared.peers.lock().unwrap().iter().map(|p| PeerInfo { id: p.id, ip: p.ip, since: p.since }).collect()
+        self.shared.peers.lock().unwrap().iter().map(|p| PeerInfo { id: p.id, ip: p.ip, via_tcp: p.via_tcp, since: p.since }).collect()
     }
 
     /// Ulangan Viewer'ni uzadi.
@@ -237,8 +242,9 @@ impl Video {
 /// Bitta Viewer sessiyasi: control xabarlari, video va kiritish.
 async fn session(mut io: SessionIo, shared: Arc<Shared>) {
     let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
-    shared.peers.lock().unwrap().push(Peer { id, ip: io.peer, since: Instant::now(), conn: io.conn.clone() });
-    println!("[host] {}: ulandi", io.peer);
+    let (real_ip, via_tcp) = rdcore::tcp_tunnel::resolve(io.peer);
+    shared.peers.lock().unwrap().push(Peer { id, ip: real_ip, via_tcp, since: Instant::now(), conn: io.conn.clone() });
+    println!("[host] {real_ip}: ulandi{}", if via_tcp { " (TCP)" } else { "" });
     let mut video: Option<Video> = None;
     loop {
         match read_message(&mut io.recv).await {
@@ -269,7 +275,7 @@ async fn session(mut io: SessionIo, shared: Arc<Shared>) {
         v.stop();
     }
     shared.peers.lock().unwrap().retain(|p| p.id != id);
-    println!("[host] {}: uzildi", io.peer);
+    println!("[host] {real_ip}: uzildi");
     io.conn.close(0u32.into(), b"bye");
 }
 

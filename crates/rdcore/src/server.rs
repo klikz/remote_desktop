@@ -69,6 +69,26 @@ impl Host {
         Ok(self.endpoint.local_addr()?)
     }
 
+    /// Xuddi shu port raqamida TCP tunnelni ham ochadi (UDP bloklangan Viewer'lar uchun zaxira).
+    /// QUIC qabul qilishga ta'sir qilmaydi. `RD_NO_TCP=1` bo'lsa ochilmaydi. Qaytgan qiymatni
+    /// Host ishlayotgan vaqtda saqlab turing: tushirilsa, tunnel to'xtaydi.
+    pub fn spawn_tcp_tunnel(&self) -> Option<crate::tcp_tunnel::TunnelServer> {
+        if std::env::var_os("RD_NO_TCP").is_some() {
+            return None;
+        }
+        let udp = self.local_addr().ok()?;
+        match crate::tcp_tunnel::spawn_server(udp, udp) {
+            Ok(t) => {
+                eprintln!("[host] TCP tunnel: {} (TCP)", udp);
+                Some(t)
+            }
+            Err(e) => {
+                eprintln!("[host] TCP tunnel ochilmadi (faqat UDP ishlaydi): {e:#}");
+                None
+            }
+        }
+    }
+
     pub fn fingerprint(&self) -> [u8; 32] {
         self.state.fingerprint
     }

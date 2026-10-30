@@ -131,7 +131,7 @@ impl WinHost {
 
         let mut kick: Option<u64> = None;
         if let Some(h) = &self.host {
-            ui.colored_label(Color32::from_rgb(110, 200, 120), format!("Tinglamoqda: UDP {}", h.port));
+            ui.colored_label(Color32::from_rgb(110, 200, 120), format!("Tinglamoqda: UDP va TCP {}", h.port));
             let peers = h.peers();
             ui.add_space(4.0);
             if peers.is_empty() {
@@ -140,7 +140,7 @@ impl WinHost {
                 ui.label("Ulanganlar:");
                 for p in &peers {
                     ui.horizontal(|ui| {
-                        ui.monospace(p.ip.to_string());
+                        ui.monospace(if p.via_tcp { format!("{} (TCP)", p.ip) } else { p.ip.to_string() });
                         ui.weak(fmt_dur(p.since.elapsed()));
                         if ui.small_button("Uzish").clicked() {
                             kick = Some(p.id);

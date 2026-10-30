@@ -81,6 +81,7 @@ async fn run_host(args: &[String]) -> Result<()> {
 
     let portal = PortalHandle::spawn(dir.join("portal.token"));
     let host = Host::bind(SocketAddr::new(ip, port), &identity, creds, caps)?;
+    let _tcp = host.spawn_tcp_tunnel();
     println!("Host ishga tushdi: {} (UDP)", host.local_addr()?);
     println!("Fingerprint: {}", hexfmt::colon(&host.fingerprint()));
     println!("Viewer birinchi ulanishda shu fingerprint'ni tasdiqlaydi.");

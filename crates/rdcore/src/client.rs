@@ -86,7 +86,7 @@ pub async fn connect_with(opts: ConnectOptions<'_>, transport: Transport) -> Res
             match connect_keyed(opts, None, AUTO_UDP_TIMEOUT).await {
                 Err(e) if e.downcast_ref::<Unreachable>().is_some() => {
                     eprintln!("UDP orqali ulanib bo'lmadi, TCP sinab ko'riladi...");
-                    connect_via_tcp(again).await
+                    connect_via_tcp(again).await.map_err(|e2| anyhow!("UDP: {e}\nTCP: {e2:#}"))
                 }
                 other => other,
             }
