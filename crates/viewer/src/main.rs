@@ -1,3 +1,6 @@
+// Windows release: konsol oynasi ochilmaydi (debug build da loglar ko'rinishi uchun qoladi).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 //! Viewer (Windows va Linux). Argumentsiz: oynali interfeys. `connect ...`: buyruq qatori (sinov uchun).
 
 mod gui;
@@ -46,6 +49,7 @@ fn main() -> Result<()> {
     if args.is_empty() {
         return gui::run();
     }
+    attach_parent_console();
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
@@ -212,3 +216,18 @@ async fn receive_video(session: &mut rdcore::client::Session, opts: &Options) ->
     }
     Ok(())
 }
+
+/// Windows release'da konsol yo'q: buyruq qatori rejimida natija chiqishi uchun ota terminalga ulanadi.
+#[cfg(all(windows, not(debug_assertions)))]
+fn attach_parent_console() {
+    extern "system" {
+        fn AttachConsole(process_id: u32) -> i32;
+    }
+    // ATTACH_PARENT_PROCESS = u32::MAX
+    unsafe {
+        AttachConsole(u32::MAX);
+    }
+}
+
+#[cfg(not(all(windows, not(debug_assertions))))]
+fn attach_parent_console() {}
