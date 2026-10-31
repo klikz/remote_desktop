@@ -9,6 +9,10 @@ pub fn config_dir() -> Result<PathBuf> {
     if let Some(d) = std::env::var_os("RD_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Ok(PathBuf::from(d));
     }
+    // Android'da `dirs::config_dir()` yo'q: ilova o'z `files` papkasini `RD_CONFIG_DIR` orqali beradi.
+    #[cfg(target_os = "android")]
+    return Err(anyhow!("Android: RD_CONFIG_DIR o'rnatilmagan (ilova files papkasi kerak)"));
+    #[cfg(not(target_os = "android"))]
     dirs::config_dir()
         .map(|d| d.join("remote-desktop"))
         .ok_or_else(|| anyhow!("konfiguratsiya papkasi aniqlanmadi"))

@@ -490,13 +490,15 @@ impl RelayPanel {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui) -> Option<ConnectRequest> {
+    /// `quality`: ulanish kartasidan oldin chiziladigan sifat tanlash kartasi.
+    pub fn ui(&mut self, ui: &mut Ui, quality: &mut dyn FnMut(&mut Ui)) -> Option<ConnectRequest> {
         let mut request = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.set_max_width(640.0);
             ui.label(RichText::new("Server orqali").size(20.0).strong());
             theme::hint(ui, "Boshqa kompyuterning 9 xonali ID sini kiriting. Ruxsat berilgach ulanasiz.");
             ui.add_space(12.0);
+            quality(ui);
             request = self.card_connect(ui);
             self.card_contacts(ui);
             self.card_this_pc(ui);

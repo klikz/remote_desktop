@@ -1,0 +1,29 @@
+# Alohida workspace: asosiy (Windows/Linux) build'ga ta'sir qilmaydi.
+[workspace]
+
+[package]
+name = "mobile-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "rdmobile"
+crate-type = ["cdylib"]
+
+[dependencies]
+protocol = { path = "../../crates/protocol" }
+rdcore = { path = "../../crates/rdcore" }
+anyhow = "1"
+jni = "0.21"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+opt-level = 3
+
+# Argon2 dev rejimida ham tez ishlashi uchun
+[profile.dev.package."*"]
+opt-level = 2

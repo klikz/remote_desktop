@@ -28,12 +28,12 @@ use std::{
 pub fn run() -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Remote Desktop")
+            .with_title("MS Remote")
             .with_inner_size([1100.0, 720.0])
             .with_min_inner_size([760.0, 520.0]),
         ..Default::default()
     };
-    eframe::run_native("Remote Desktop", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+    eframe::run_native("MS Remote", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
         .map_err(|e| anyhow::anyhow!("oyna ochilmadi: {e}"))
 }
 
@@ -46,6 +46,39 @@ const PRESETS: [(&str, u16, u32, u16); 5] = [
     ("Maksimal · asl", 30, 40_000, 0),
 ];
 const HEIGHTS: [(u16, &str); 5] = [(720, "720p"), (1080, "1080p"), (1440, "1440p"), (2160, "2160p"), (0, "Asl o'lcham")];
+
+/// Sifat shablonlari va qo'shimcha sozlamalar (P2P va "Server orqali" uchun umumiy).
+fn quality_picker(ui: &mut egui::Ui, salt: &str, fps: &mut u16, kbps: &mut u32, height: &mut u16) {
+    ui.label(theme::dim("Sifat"));
+    let current = PRESETS.iter().find(|p| p.1 == *fps && p.2 == *kbps && p.3 == *height).map(|p| p.0);
+    ui.horizontal_wrapped(|ui| {
+        for p in PRESETS {
+            if ui.selectable_label(current == Some(p.0), p.0).clicked() {
+                *fps = p.1;
+                *kbps = p.2;
+                *height = p.3;
+            }
+        }
+    });
+    egui::CollapsingHeader::new("Qo'shimcha sozlamalar").id_salt((salt, "adv")).default_open(false).show(ui, |ui| {
+        egui::Grid::new((salt, "quality")).num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
+            ui.label(theme::dim("FPS"));
+            ui.add(egui::Slider::new(fps, 5..=60));
+            ui.end_row();
+            ui.label(theme::dim("Bitrate"));
+            ui.add(egui::Slider::new(kbps, 500..=50_000).logarithmic(true).suffix(" kbit/s"));
+            ui.end_row();
+            ui.label(theme::dim("O'lcham"));
+            let hname = HEIGHTS.iter().find(|h| h.0 == *height).map(|h| h.1).unwrap_or("Boshqa");
+            egui::ComboBox::from_id_salt((salt, "height")).selected_text(hname).show_ui(ui, |ui| {
+                for (v, n) in HEIGHTS {
+                    ui.selectable_value(height, v, n);
+                }
+            });
+            ui.end_row();
+        });
+    });
+}
 
 #[derive(PartialEq, Clone, Copy)]
 enum Tab {
@@ -332,7 +365,7 @@ impl App {
         egui::TopBottomPanel::top("header").frame(theme::header_frame()).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 theme::dot(ui, theme::ACCENT);
-                ui.label(RichText::new("Remote Desktop").size(16.0).strong());
+                ui.label(RichText::new("MS Remote").size(16.0).strong());
                 ui.add_space(14.0);
                 if theme::tab(ui, self.tab == Tab::Connect, "P2P").clicked() {
                     self.tab = Tab::Connect;
@@ -367,7 +400,14 @@ impl App {
         }
         if self.tab == Tab::Relay {
             let mut req = None;
-            egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| req = self.relay.ui(ui));
+            let form = &mut self.form;
+            egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| {
+                req = self.relay.ui(ui, &mut |ui| {
+                    theme::card(ui, Some("SIFAT"), |ui| {
+                        quality_picker(ui, "relay", &mut form.fps, &mut form.kbps, &mut form.height);
+                    });
+                })
+            });
             if let Some(r) = req {
                 self.connect_relay(ctx, r);
             }
@@ -493,38 +533,7 @@ impl App {
                         },
                     );
                     ui.add_space(8.0);
-                    ui.label(theme::dim("Sifat"));
-                    let current = PRESETS
-                        .iter()
-                        .find(|p| p.1 == self.form.fps && p.2 == self.form.kbps && p.3 == self.form.height)
-                        .map(|p| p.0);
-                    ui.horizontal_wrapped(|ui| {
-                        for p in PRESETS {
-                            if ui.selectable_label(current == Some(p.0), p.0).clicked() {
-                                self.form.fps = p.1;
-                                self.form.kbps = p.2;
-                                self.form.height = p.3;
-                            }
-                        }
-                    });
-                    egui::CollapsingHeader::new("Qo'shimcha sozlamalar").default_open(false).show(ui, |ui| {
-                        egui::Grid::new("quality").num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
-                            ui.label(theme::dim("FPS"));
-                            ui.add(egui::Slider::new(&mut self.form.fps, 5..=60));
-                            ui.end_row();
-                            ui.label(theme::dim("Bitrate"));
-                            ui.add(egui::Slider::new(&mut self.form.kbps, 500..=50_000).logarithmic(true).suffix(" kbit/s"));
-                            ui.end_row();
-                            ui.label(theme::dim("O'lcham"));
-                            let hname = HEIGHTS.iter().find(|h| h.0 == self.form.height).map(|h| h.1).unwrap_or("Boshqa");
-                            egui::ComboBox::from_id_salt("height").selected_text(hname).show_ui(ui, |ui| {
-                                for (v, n) in HEIGHTS {
-                                    ui.selectable_value(&mut self.form.height, v, n);
-                                }
-                            });
-                            ui.end_row();
-                        });
-                    });
+                    quality_picker(ui, "p2p", &mut self.form.fps, &mut self.form.kbps, &mut self.form.height);
                     ui.add_space(8.0);
                     ui.checkbox(&mut self.form.input, "Sichqoncha va klaviatura bilan boshqarish");
                     ui.checkbox(&mut self.form.save, "Ro'yxatga saqlash");
@@ -744,6 +753,7 @@ impl App {
         for c in tray.poll() {
             match c {
                 tray::Cmd::Show => show = true,
+                tray::Cmd::Shown => self.hidden = false,
                 tray::Cmd::Quit => {
                     self.quitting = true;
                     ctx.send_viewport_cmd(ViewportCommand::Close);

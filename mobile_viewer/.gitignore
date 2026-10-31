@@ -1,0 +1,9 @@
+core/target/
+app/build/
+app/.cxx/
+.gradle/
+build/
+local.properties
+app/src/main/jniLibs/
+*.iml
+.idea/

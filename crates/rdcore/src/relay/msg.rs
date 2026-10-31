@@ -16,7 +16,8 @@ pub enum RMsg {
     Hello { id: String, token: String, name: String },
     Proof { proof: [u8; PROOF_LEN] },
     Sub(Vec<String>),
-    Connect { target: String, req: String },
+    /// `ask`: Viewer'da qarovsiz parol yo'q — qarovsiz Host ham ruxsat oynasini ko'rsatadi.
+    Connect { target: String, req: String, ask: bool },
     /// Qabul qiluvchi javobi. `pw`: bir martalik parol (`None`: Viewer o'z parolini kiritadi).
     Reply { sid: String, accept: bool, pw: Option<String> },
     /// Ma'lumot oqimining birinchi xabari (control'dan alohida oqimda).
@@ -26,7 +27,7 @@ pub enum RMsg {
     Ok { id: String, token: String },
     Err { text: String },
     Pres { id: String, online: bool, name: String },
-    Incoming { sid: String, from: String, name: String },
+    Incoming { sid: String, from: String, name: String, ask: bool },
     Result { req: String, ok: bool, sid: String, pw: Option<String>, text: String },
 }
 
@@ -63,7 +64,7 @@ impl RMsg {
             RMsg::Hello { id, token, name } => format!("HELLO {} {} {}", dash(id), dash(token), dash(&clean(name))),
             RMsg::Proof { proof } => format!("PROOF {}", hexfmt::encode(proof)),
             RMsg::Sub(ids) => format!("SUB {}", dash(&ids.join(","))),
-            RMsg::Connect { target, req } => format!("CONNECT {target} {req}"),
+            RMsg::Connect { target, req, ask } => format!("{} {target} {req}", if *ask { "CONNECT_ASK" } else { "CONNECT" }),
             RMsg::Reply { sid, accept, pw } => {
                 format!("REPLY {sid} {} {}", *accept as u8, dash(pw.as_deref().unwrap_or("")))
             }
@@ -72,7 +73,9 @@ impl RMsg {
             RMsg::Ok { id, token } => format!("OK {id} {token}"),
             RMsg::Err { text } => format!("ERR {}", dash(&clean(text))),
             RMsg::Pres { id, online, name } => format!("PRES {id} {} {}", *online as u8, dash(&clean(name))),
-            RMsg::Incoming { sid, from, name } => format!("INCOMING {sid} {from} {}", dash(&clean(name))),
+            RMsg::Incoming { sid, from, name, ask } => {
+                format!("{} {sid} {from} {}", if *ask { "INCOMING_ASK" } else { "INCOMING" }, dash(&clean(name)))
+            }
             RMsg::Result { req, ok, sid, pw, text } => format!(
                 "RESULT {req} {} {} {} {}",
                 *ok as u8,
@@ -86,7 +89,7 @@ impl RMsg {
     pub fn decode(line: &str) -> Result<RMsg> {
         let (tag, rest) = line.split_once(' ').unwrap_or((line, ""));
         let mut f = rest.splitn(match tag {
-            "HELLO" | "PRES" | "INCOMING" => 3,
+            "HELLO" | "PRES" | "INCOMING" | "INCOMING_ASK" => 3,
             "RESULT" => 5,
             "REPLY" => 3,
             "ERR" => 1,
@@ -100,7 +103,7 @@ impl RMsg {
                 let s = next();
                 RMsg::Sub(if s == "-" || s.is_empty() { vec![] } else { s.split(',').map(str::to_string).collect() })
             }
-            "CONNECT" => RMsg::Connect { target: next().to_string(), req: next().to_string() },
+            "CONNECT" | "CONNECT_ASK" => RMsg::Connect { target: next().to_string(), req: next().to_string(), ask: tag == "CONNECT_ASK" },
             "REPLY" => {
                 let sid = next().to_string();
                 let accept = next() == "1";
@@ -112,7 +115,9 @@ impl RMsg {
             "OK" => RMsg::Ok { id: next().to_string(), token: next().to_string() },
             "ERR" => RMsg::Err { text: undash(next()) },
             "PRES" => RMsg::Pres { id: next().to_string(), online: next() == "1", name: undash(next()) },
-            "INCOMING" => RMsg::Incoming { sid: next().to_string(), from: next().to_string(), name: undash(next()) },
+            "INCOMING" | "INCOMING_ASK" => {
+                RMsg::Incoming { sid: next().to_string(), from: next().to_string(), name: undash(next()), ask: tag == "INCOMING_ASK" }
+            }
             "RESULT" => {
                 let req = next().to_string();
                 let ok = next() == "1";
@@ -163,7 +168,8 @@ mod tests {
             RMsg::Proof { proof: [7; PROOF_LEN] },
             RMsg::Sub(vec![]),
             RMsg::Sub(vec!["111111111".into(), "222222222".into()]),
-            RMsg::Connect { target: "123456789".into(), req: "r1".into() },
+            RMsg::Connect { target: "123456789".into(), req: "r1".into(), ask: false },
+            RMsg::Connect { target: "123456789".into(), req: "r1".into(), ask: true },
             RMsg::Reply { sid: "s".into(), accept: true, pw: Some("pw1".into()) },
             RMsg::Reply { sid: "s".into(), accept: false, pw: None },
             RMsg::Data { sid: "s".into() },
@@ -172,7 +178,8 @@ mod tests {
             RMsg::Err { text: "xato bor".into() },
             RMsg::Pres { id: "123456789".into(), online: true, name: "Ali PC".into() },
             RMsg::Pres { id: "123456789".into(), online: false, name: String::new() },
-            RMsg::Incoming { sid: "s".into(), from: "111111111".into(), name: "Vali noutbuk".into() },
+            RMsg::Incoming { sid: "s".into(), from: "111111111".into(), name: "Vali noutbuk".into(), ask: false },
+            RMsg::Incoming { sid: "s".into(), from: "111111111".into(), name: "Vali noutbuk".into(), ask: true },
             RMsg::Result { req: "r".into(), ok: true, sid: "s".into(), pw: None, text: String::new() },
             RMsg::Result { req: "r".into(), ok: false, sid: String::new(), pw: None, text: "rad etildi".into() },
         ];

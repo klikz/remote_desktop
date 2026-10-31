@@ -80,7 +80,7 @@ pub struct Relayed {
 enum Cmd {
     Subscribe(Vec<String>),
     Reply { sid: String, accept: bool },
-    Connect { target: String, tx: oneshot::Sender<Result<Relayed, String>> },
+    Connect { target: String, ask: bool, tx: oneshot::Sender<Result<Relayed, String>> },
 }
 
 pub struct Agent {
@@ -138,8 +138,13 @@ pub struct Connector(mpsc::UnboundedSender<Cmd>);
 impl Connector {
     /// Yuborib bo'lmasa (agent to'xtagan) qaytgan `Receiver` xato beradi.
     pub fn connect(&self, target: &str) -> oneshot::Receiver<Result<Relayed, String>> {
+        self.connect_ask(target, false)
+    }
+
+    /// `ask = true`: Viewer'da qarovsiz parol yo'q, qarovsiz Host ham ruxsat oynasi orqali bir martalik parol beradi.
+    pub fn connect_ask(&self, target: &str, ask: bool) -> oneshot::Receiver<Result<Relayed, String>> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.0.send(Cmd::Connect { target: target.to_string(), tx });
+        let _ = self.0.send(Cmd::Connect { target: target.to_string(), ask, tx });
         rx
     }
 }
@@ -269,7 +274,7 @@ async fn session(
     });
 
     let mut connects: HashMap<String, oneshot::Sender<Result<Relayed, String>>> = HashMap::new();
-    let mut pending_in: HashMap<String, String> = HashMap::new();
+    let mut pending_in: HashMap<String, (String, Option<EnsureHost>)> = HashMap::new();
     let exit = loop {
         tokio::select! {
             m = in_rx.recv() => {
@@ -278,15 +283,19 @@ async fn session(
                     RMsg::Pres { id, online, name } => {
                         let _ = ev.send(AgentEvent::Presence { id, online, name });
                     }
-                    RMsg::Incoming { sid, from, name } => {
+                    RMsg::Incoming { sid, from, name, ask } => {
                         let (auto, unattended, ensure) = {
                             let p = policy.lock().unwrap_or_else(|e| e.into_inner());
-                            (p.unattended || p.trusted.contains(&from), p.unattended, p.ensure_host.clone())
+                            // `ask`: Viewer qarovsiz parolsiz keldi — dialog (yoki ishonchli ID) orqali bir martalik parol
+                            let unattended = p.unattended && !ask;
+                            // Qarovsiz rejim yoqilgan bo'lsa Host har doim alohida (qarovsiz) Host bo'ladi
+                            let ensure = if p.unattended { p.ensure_host.clone() } else { None };
+                            (unattended || p.trusted.contains(&from), unattended, ensure)
                         };
                         if auto {
-                            accept(&conn, &mut send, &sid, &from, !unattended, cfg.host_port, if unattended { ensure } else { None }).await?;
+                            accept(&conn, &mut send, &sid, &from, !unattended, cfg.host_port, ensure).await?;
                         } else {
-                            pending_in.insert(sid.clone(), from.clone());
+                            pending_in.insert(sid.clone(), (from.clone(), ensure));
                             let _ = ev.send(AgentEvent::Incoming { sid, from, name });
                         }
                     }
@@ -312,18 +321,18 @@ async fn session(
                     write_msg(&mut send, &RMsg::Sub(v)).await?;
                 }
                 Some(Cmd::Reply { sid, accept: yes }) => {
-                    if let Some(from) = pending_in.remove(&sid) {
+                    if let Some((from, ensure)) = pending_in.remove(&sid) {
                         if yes {
-                            accept(&conn, &mut send, &sid, &from, true, cfg.host_port, None).await?;
+                            accept(&conn, &mut send, &sid, &from, true, cfg.host_port, ensure).await?;
                         } else {
                             write_msg(&mut send, &RMsg::Reply { sid, accept: false, pw: None }).await?;
                         }
                     }
                 }
-                Some(Cmd::Connect { target, tx }) => {
+                Some(Cmd::Connect { target, ask, tx }) => {
                     let req = hexfmt::encode(&auth::random_bytes::<6>());
                     connects.insert(req.clone(), tx);
-                    write_msg(&mut send, &RMsg::Connect { target, req }).await?;
+                    write_msg(&mut send, &RMsg::Connect { target, req, ask }).await?;
                 }
             },
             _ = conn.closed() => break Exit::Disconnected,
@@ -347,6 +356,7 @@ async fn accept(
     mut host_port: Option<u16>,
     ensure: Option<EnsureHost>,
 ) -> Result<()> {
+    let had_ensure = ensure.is_some();
     if let Some(ensure) = ensure {
         // Qarovsiz: alohida parolli Host kerak bo'lsa shu yerda ishga tushadi
         match tokio::task::spawn_blocking(move || ensure()).await {
@@ -360,7 +370,9 @@ async fn accept(
         }
     }
     let pw = if one_time {
-        let made = Credentials::load(&paths::host_password_file()?)
+        // Alohida (qarovsiz) Host ishlatilsa, bir martalik kalit shu Host'ning tuzi bilan olinadi
+        let pw_file = if had_ensure { paths::unattended_file()? } else { paths::host_password_file()? };
+        let made = Credentials::load(&pw_file)
             .context("Host paroli o'rnatilmagan")
             .and_then(|c| onetime::create(&c.salt));
         match made {

@@ -6,6 +6,8 @@
 #   make push     hamma o'zgarishni commit (xabar ".") va push qilish; xabar: make push MSG="matn"
 #   make buildWin Windows uchun build (release)
 #   make runWin   Windows: cargo run -p viewer (debug, terminalda loglar ko'rinadi)
+#   make mobileBuild  Android APK yig'ish (mobile_viewer/app/build/outputs/apk/debug/app-debug.apk)
+#   make mobileRun    APK yig'ish, telefon/emulyatorga o'rnatish va ishga tushirish
 #   make clean    build fayllarini o'chirish
 #   NO_HOST=1 make   GStreamer dev paketlarisiz (faqat Viewer)
 
@@ -16,7 +18,14 @@ export PATH := $(HOME)/.cargo/bin:$(PATH)
 
 MSG ?= .
 
-.PHONY: all update toolchain build install-host run push clean buildWin runWin
+# Windows PowerShell'da `bash` WSL'ga tushadi (distro yo'q bo'lsa xato): Git Bash ishlatiladi
+ifeq ($(OS),Windows_NT)
+MOBILE_BASH ?= "C:/Program Files/Git/bin/bash.exe"
+else
+MOBILE_BASH ?= bash
+endif
+
+.PHONY: all update toolchain build install-host run push clean buildWin runWin mobileBuild mobileRun
 
 all: update build run
 
@@ -58,3 +67,11 @@ buildWin:
 
 runWin:
 	cargo run -p viewer
+
+# --- Android (mobile_viewer/) --------------------------------------------------------------------
+
+mobileBuild:
+	$(MOBILE_BASH) scripts/mobile.sh build
+
+mobileRun:
+	$(MOBILE_BASH) scripts/mobile.sh run

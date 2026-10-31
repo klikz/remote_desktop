@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex, MutexGuard,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::{
     io::copy_bidirectional,
@@ -36,7 +36,6 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(35);
 /// Ruxsatdan keyin ikkala oqim shuncha vaqt ichida kelishi kerak.
 const DATA_WINDOW: Duration = Duration::from_secs(40);
-const MAX_SUBS: usize = 200;
 
 type Duplex = tokio::io::Join<quinn::RecvStream, quinn::SendStream>;
 
@@ -61,8 +60,6 @@ struct St {
     creds: Option<Credentials>,
     /// Yo'q ID ga urinishlar (ID ni taxmin qilishdan himoya), IP bo'yicha.
     probes: RateLimiter,
-    /// Yangi ID olishlar: IP -> (soni, oyna boshlanishi).
-    new_ids: Mutex<HashMap<IpAddr, (u32, Instant)>>,
     fingerprint: [u8; 32],
     limiter: RateLimiter,
     reg: Mutex<Registry>,
@@ -138,7 +135,6 @@ impl RelayServer {
             st: Arc::new(St {
                 creds,
                 probes: RateLimiter::new(10, Duration::from_secs(600), Duration::from_secs(900)),
-                new_ids: Mutex::new(HashMap::new()),
                 fingerprint: identity.fingerprint(),
                 limiter: RateLimiter::standard(),
                 reg: Mutex::new(Registry::load(registry_path)),
@@ -247,22 +243,6 @@ async fn client_task(incoming: quinn::Incoming, st: Arc<St>, ip: IpAddr) -> Resu
         n => n,
     };
     // Shaxsiyat: ID+token mos kelsa shu ID; ID yo'q yoki ro'yxatda topilmasa yangisi; token mos kelmasa rad.
-    let known = !id.is_empty() && lock(&st.reg).get(&id).is_some();
-    if !known {
-        // Yangi ID: ro'yxat hajmi va IP bo'yicha tezlik cheklanadi (ochiq serverni to'ldirib yuborishdan himoya)
-        let why = if lock(&st.reg).ids().len() >= MAX_IDS {
-            Some("serverda joy qolmadi (ro'yxat to'lgan)")
-        } else if !allow_new_id(&st, ip) {
-            Some("bu manzildan juda ko'p yangi ID so'raldi, keyinroq urinib ko'ring")
-        } else {
-            None
-        };
-        if let Some(text) = why {
-            let _ = write_msg(&mut send, &RMsg::Err { text: text.into() }).await;
-            finish_and_close(send, &conn).await;
-            bail!("{text}");
-        }
-    }
     let ident = {
         let mut reg = lock(&st.reg);
         if id.is_empty() {
@@ -349,25 +329,6 @@ async fn client_task(incoming: quinn::Incoming, st: Arc<St>, ip: IpAddr) -> Resu
     Ok(())
 }
 
-/// Bitta IP soatiga shuncha yangi ID ola oladi.
-const NEW_IDS_PER_HOUR: u32 = 10;
-/// Ro'yxatdagi ID'lar chegarasi.
-const MAX_IDS: usize = 2000;
-
-fn allow_new_id(st: &St, ip: IpAddr) -> bool {
-    let mut m = lock(&st.new_ids);
-    let now = Instant::now();
-    let e = m.entry(ip).or_insert((0, now));
-    if now.duration_since(e.1) >= Duration::from_secs(3600) {
-        *e = (0, now);
-    }
-    if e.0 >= NEW_IDS_PER_HOUR {
-        return false;
-    }
-    e.0 += 1;
-    true
-}
-
 async fn finish_and_close(mut send: quinn::SendStream, conn: &quinn::Connection) {
     let _ = send.finish();
     let _ = timeout(Duration::from_secs(2), send.stopped()).await;
@@ -384,7 +345,7 @@ fn fail(st: &St, to: &str, req: &str, text: &str) {
 fn handle(st: &Arc<St>, id: &str, m: RMsg) {
     match m {
         RMsg::Sub(ids) => {
-            let ids: HashSet<String> = ids.into_iter().filter(|i| valid_id(i)).take(MAX_SUBS).collect();
+            let ids: HashSet<String> = ids.into_iter().filter(|i| valid_id(i)).collect();
             let msgs: Vec<RMsg> = ids.iter().map(|i| st.pres(i)).collect();
             if let Some(o) = lock(&st.online).get_mut(id) {
                 o.subs = ids;
@@ -393,7 +354,7 @@ fn handle(st: &Arc<St>, id: &str, m: RMsg) {
                 }
             }
         }
-        RMsg::Connect { target, req } => {
+        RMsg::Connect { target, req, ask } => {
             if !valid_id(&target) {
                 return fail(st, id, &req, "ID noto'g'ri (9 ta raqam)");
             }
@@ -417,7 +378,7 @@ fn handle(st: &Arc<St>, id: &str, m: RMsg) {
                 sid.clone(),
                 Sess { a: id.to_string(), b: target.clone(), req: req.clone(), accepted: false },
             );
-            if !st.send_to(&target, RMsg::Incoming { sid: sid.clone(), from: id.to_string(), name: my_name }) {
+            if !st.send_to(&target, RMsg::Incoming { sid: sid.clone(), from: id.to_string(), name: my_name, ask }) {
                 lock(&st.sessions).remove(&sid);
                 return fail(st, id, &req, "kompyuter oflayn");
             }
