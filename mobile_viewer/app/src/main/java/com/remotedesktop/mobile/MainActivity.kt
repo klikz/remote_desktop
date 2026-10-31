@@ -83,7 +83,7 @@ class MainActivity : Activity() {
 
         // --- ulanish kartasi
         idEdit = edit("9 xonali ID", settings.lastTarget, InputType.TYPE_CLASS_NUMBER)
-        passEdit = edit("Parol (qarovsiz rejim uchun)", "", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        passEdit = edit("Kalit (agar kerak bo'lsa)", "", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         presetGroup = RadioGroup(this).apply {
             PRESETS.forEachIndexed { i, p ->
                 addView(

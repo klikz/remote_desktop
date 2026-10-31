@@ -30,7 +30,8 @@ pub fn run() -> anyhow::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title("MS Remote")
             .with_inner_size([1100.0, 720.0])
-            .with_min_inner_size([760.0, 520.0]),
+            .with_min_inner_size([760.0, 520.0])
+            .with_icon(std::sync::Arc::new(egui::IconData { rgba: crate::icon_draw::icon_rgba(256), width: 256, height: 256 })),
         ..Default::default()
     };
     eframe::run_native("MS Remote", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
@@ -152,7 +153,7 @@ impl App {
         theme::apply(&cc.egui_ctx);
         let hosts = hosts::load();
         let mut app = App {
-            tab: Tab::Connect,
+            tab: Tab::Relay,
             host: hostpanel::HostPanel::new(),
             relay: relaypanel::RelayPanel::new(),
             relay_target: None,
@@ -378,17 +379,10 @@ impl App {
                 theme::dot(ui, theme::ACCENT);
                 ui.label(RichText::new("MS Remote").size(16.0).strong());
                 ui.add_space(14.0);
-                if theme::tab(ui, self.tab == Tab::Connect, "P2P").clicked() {
-                    self.tab = Tab::Connect;
-                }
-                if theme::tab(ui, self.tab == Tab::Relay, "Server orqali").clicked() {
-                    self.tab = Tab::Relay;
-                }
-                if theme::tab(ui, self.tab == Tab::Host, "HOST").clicked() {
-                    self.tab = Tab::Host;
-                }
-                if theme::tab(ui, self.tab == Tab::ThisPc, "Bu kompyuter").clicked() {
-                    self.tab = Tab::ThisPc;
+                for (t, name) in [(Tab::Relay, "Server orqali"), (Tab::Connect, "P2P"), (Tab::ThisPc, "Sozlamalar"), (Tab::Host, "HOST")] {
+                    if theme::tab(ui, self.tab == t, name).clicked() {
+                        self.tab = t;
+                    }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     theme::chip(ui, host_label, if host_on { theme::GOOD } else { theme::DIM });
@@ -410,10 +404,18 @@ impl App {
             return;
         }
         if self.tab == Tab::Relay {
-            let mut req = None;
+            // Chapda "Oldin ulanganlar" (P2P'dagi saqlangan Host'lar kabi), o'rtada ulanish formasi
+            let mut req = egui::SidePanel::left("relay_contacts")
+                .exact_width(250.0)
+                .resizable(false)
+                .frame(theme::side_frame())
+                .show(ctx, |ui| self.relay.ui_side(ui))
+                .inner;
             let form = &mut self.form;
             egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| {
-                req = self.relay.ui(ui, &mut |ui| quality_card(ui, "relay", &mut form.fps, &mut form.kbps, &mut form.height))
+                if let Some(r) = self.relay.ui(ui, &mut |ui| quality_card(ui, "relay", &mut form.fps, &mut form.kbps, &mut form.height)) {
+                    req = Some(r);
+                }
             });
             if let Some(r) = req {
                 self.connect_relay(ctx, r);
@@ -480,12 +482,11 @@ impl App {
         // --- Ulanish formasi
         egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.set_max_width(theme::PAGE_W);
                 let title = match self.selected.and_then(|i| self.hosts.get(i)) {
                     Some(h) => h.name.clone(),
                     None => "Yangi ulanish".to_string(),
                 };
-                theme::page_title(ui, &title, &["Host manzili va parolini kiriting. Parol hech qayerda saqlanmaydi."]);
+                theme::page_title(ui, &title, &["Host manzili va kalitini kiriting. Kalit hech qayerda saqlanmaydi."]);
 
                 let mut pw_enter = false;
                 theme::card(ui, Some("HOST"), |ui| {
@@ -500,7 +501,7 @@ impl App {
                             ui.add(theme::input(&mut self.form.port).desired_width(70.0));
                         });
                         ui.end_row();
-                        ui.label(theme::dim("Parol"));
+                        ui.label(theme::dim("Kalit"));
                         ui.horizontal(|ui| {
                             let r = ui.add(theme::input(&mut self.form.password).password(!self.form.show_password));
                             pw_enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));

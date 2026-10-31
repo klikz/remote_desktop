@@ -381,14 +381,14 @@ async fn accept(
             None => paths::host_password_file()
                 .and_then(|p| Credentials::load(&p))
                 .map(|c| c.salt)
-                .context("Host paroli o'rnatilmagan"),
+                .context("Host kaliti o'rnatilmagan"),
         };
         let made = salt.and_then(|s| onetime::create(&s));
         match made {
             Ok(p) => Some(p),
             Err(e) => {
                 write_msg(send, &RMsg::Reply { sid: sid.to_string(), accept: false, pw: None }).await?;
-                eprintln!("[agent] bir martalik parol yaratilmadi: {e:#}");
+                eprintln!("[agent] bir martalik kalit yaratilmadi: {e:#}");
                 return Ok(());
             }
         }

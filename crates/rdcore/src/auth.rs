@@ -64,7 +64,7 @@ pub struct Credentials {
 impl Credentials {
     pub fn from_password(password: &str) -> Result<Self> {
         if password.chars().count() < MIN_PASSWORD_LEN {
-            bail!("parol kamida {MIN_PASSWORD_LEN} belgidan iborat bo'lishi kerak");
+            bail!("kalit kamida {MIN_PASSWORD_LEN} belgidan iborat bo'lishi kerak");
         }
         let salt = random_bytes::<SALT_LEN>();
         let key = derive_key(password, &salt)?;
@@ -82,10 +82,10 @@ impl Credentials {
         let mut lines = text.lines();
         let salt = hexfmt::decode(lines.next().unwrap_or(""))
             .and_then(|v| <[u8; SALT_LEN]>::try_from(v).ok())
-            .ok_or_else(|| anyhow!("parol fayli buzilgan (tuz)"))?;
+            .ok_or_else(|| anyhow!("kalit fayli buzilgan (tuz)"))?;
         let key = hexfmt::decode(lines.next().unwrap_or(""))
             .and_then(|v| <[u8; 32]>::try_from(v).ok())
-            .ok_or_else(|| anyhow!("parol fayli buzilgan (kalit)"))?;
+            .ok_or_else(|| anyhow!("kalit fayli buzilgan (xesh)"))?;
         Ok(Credentials { salt, key })
     }
 }

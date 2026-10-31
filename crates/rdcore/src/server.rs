@@ -185,14 +185,14 @@ async fn serve(incoming: quinn::Incoming, state: &State, ip: IpAddr, handler: Ha
         // Relay orqali kelgan (loopback) urinishda sababini aniqlash uchun: bir martalik parol holati
         let hint = if ip.is_loopback() {
             match crate::paths::onetime_file().ok().and_then(|p| std::fs::metadata(p).ok()) {
-                None => " (bir martalik parol fayli yo'q: ruxsat berilmagan yoki muddati o'tgan/ishlatilgan, yoki Host eski versiya)",
-                Some(_) if crate::onetime::load_key().is_none() => " (bir martalik parol muddati o'tgan)",
-                Some(_) => " (bir martalik parol mos kelmadi: parol o'zgargan bo'lishi mumkin, Host'ni qayta ishga tushiring)",
+                None => " (bir martalik kalit fayli yo'q: ruxsat berilmagan yoki muddati o'tgan/ishlatilgan, yoki Host eski versiya)",
+                Some(_) if crate::onetime::load_key().is_none() => " (bir martalik kalit muddati o'tgan)",
+                Some(_) => " (bir martalik kalit mos kelmadi: kalit o'zgargan bo'lishi mumkin, Host'ni qayta ishga tushiring)",
             }
         } else {
             ""
         };
-        bail!("noto'g'ri parol{hint}");
+        bail!("noto'g'ri kalit{hint}");
     }
     state.limiter.record_success(ip);
 

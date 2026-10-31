@@ -4,6 +4,7 @@
 //! Viewer (Windows va Linux). Argumentsiz: oynali interfeys. `connect ...`: buyruq qatori (sinov uchun).
 
 mod gui;
+mod icon_draw;
 
 use anyhow::{bail, Context, Result};
 use protocol::DEFAULT_PORT;
@@ -114,7 +115,7 @@ fn ask_yes_no(question: &str) -> bool {
 
 async fn run_connect(target: &str, opts: Options) -> Result<()> {
     let addr = resolve(target).await?;
-    let password = rpassword::prompt_password("Parol: ")?;
+    let password = rpassword::prompt_password("Kalit: ")?;
     let known_hosts = KnownHosts::new(paths::known_hosts_file()?);
 
     let confirm = |fp: &str| {

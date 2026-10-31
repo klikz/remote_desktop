@@ -44,15 +44,15 @@ pub async fn run() -> Result<()> {
 }
 
 fn set_password() -> Result<()> {
-    let p1 = rpassword::prompt_password("Yangi parol (kamida 8 belgi): ")?;
-    let p2 = rpassword::prompt_password("Parolni takrorlang: ")?;
+    let p1 = rpassword::prompt_password("Yangi kalit (kamida 8 belgi): ")?;
+    let p2 = rpassword::prompt_password("Kalitni takrorlang: ")?;
     if p1 != p2 {
-        bail!("parollar mos kelmadi");
+        bail!("kalitlar mos kelmadi");
     }
     let creds = Credentials::from_password(&p1)?;
     let path = paths::host_password_file()?;
     creds.save(&path)?;
-    println!("Parol saqlandi: {}", path.display());
+    println!("Kalit saqlandi: {}", path.display());
     Ok(())
 }
 
@@ -74,7 +74,7 @@ async fn run_host(args: &[String]) -> Result<()> {
     let dir = paths::config_dir()?;
     let identity = HostIdentity::load_or_create(&dir)?;
     let creds = Credentials::load(&pw_file.map_or_else(paths::host_password_file, Ok)?)
-        .context("parol o'rnatilmagan. Avval `host-linux set-password` ni ishga tushiring")?;
+        .context("kalit o'rnatilmagan. Avval `host-linux set-password` ni ishga tushiring")?;
     let caps = Capabilities {
         codecs: CODEC_H264,
         max_fps: 60,

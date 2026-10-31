@@ -21,8 +21,6 @@ pub const GOOD: Color32 = Color32::from_rgb(72, 199, 128);
 pub const WARN: Color32 = Color32::from_rgb(240, 178, 74);
 pub const BAD: Color32 = Color32::from_rgb(238, 98, 98);
 
-/// Sahifa mazmunining eng katta kengligi (hamma bo'limda bir xil).
-pub const PAGE_W: f32 = 680.0;
 /// Kiritish maydonlari va tugmalarning balandligi (bir qatorda bir xil ko'rinishi uchun).
 pub const FIELD_H: f32 = 34.0;
 /// Shakl (forma) qatorlaridagi standart maydon kengligi.
@@ -81,6 +79,8 @@ pub fn apply(ctx: &Context) {
         s.spacing.icon_width_inner = 10.0;
         s.spacing.window_margin = Margin::same(18.0);
         s.spacing.slider_width = 220.0;
+        // Aylantirish chizig'i kontent ustiga chiqmaydi (kartalar o'ng chetiga tegib qolmaydi)
+        s.spacing.scroll = egui::style::ScrollStyle::solid();
         s.text_styles = [
             (TextStyle::Heading, FontId::proportional(20.0)),
             (TextStyle::Body, FontId::proportional(14.0)),

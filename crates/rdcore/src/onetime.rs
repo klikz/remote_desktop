@@ -23,7 +23,7 @@ pub fn create(salt: &[u8; protocol::SALT_LEN]) -> Result<String> {
     let pw: String = raw.iter().map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char).collect();
     let key = auth::derive_key(&pw, salt)?;
     let text = format!("{}\n{}\n", hexfmt::encode(&key), now() + TTL_SECS);
-    fsutil::write_private(&paths::onetime_file()?, text.as_bytes()).context("bir martalik parol yozilmadi")?;
+    fsutil::write_private(&paths::onetime_file()?, text.as_bytes()).context("bir martalik kalit yozilmadi")?;
     Ok(pw)
 }
 

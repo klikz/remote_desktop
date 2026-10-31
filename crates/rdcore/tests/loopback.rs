@@ -87,8 +87,8 @@ async fn wrong_password_is_rejected() {
         confirm_new_host: &|_| true,
     })
     .await;
-    let err = res.err().expect("noto'g'ri parol rad etilishi kerak");
-    assert!(format!("{err:#}").contains("noto'g'ri parol"), "xato matni: {err:#}");
+    let err = res.err().expect("noto'g'ri kalit rad etilishi kerak");
+    assert!(format!("{err:#}").contains("noto'g'ri kalit"), "xato matni: {err:#}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

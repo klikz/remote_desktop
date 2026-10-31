@@ -136,7 +136,7 @@ async fn relay_end_to_end() {
     assert_eq!(from, a_id);
     b.reply(&sid, true);
     let relayed = timeout(Duration::from_secs(8), rx).await.unwrap().unwrap().expect("ruxsat berilishi kerak");
-    let pw = relayed.pw.clone().expect("dialogli rejimda bir martalik parol keladi");
+    let pw = relayed.pw.clone().expect("dialogli rejimda bir martalik kalit keladi");
     ping_through(relayed, &b_id, &pw, &dir).await;
 
     // Bir martalik parol bir marta ishlaydi: ikkinchi urinish rad etiladi
@@ -154,7 +154,7 @@ async fn relay_end_to_end() {
         format!("id:{b_id}"),
     )
     .await;
-    assert!(again.is_err(), "eski bir martalik parol ishlamasligi kerak");
+    assert!(again.is_err(), "eski bir martalik kalit ishlamasligi kerak");
 
     // 2) Rad etish
     let rx = a.connect(&b_id);
@@ -196,7 +196,7 @@ async fn relay_end_to_end() {
         format!("id:{b_id}"),
     )
     .await;
-    assert!(wrong.is_err(), "Host paroli qarovsiz Host'da ishlamasligi kerak");
+    assert!(wrong.is_err(), "Host kaliti qarovsiz Host'da ishlamasligi kerak");
 
     // 3c) Qarovsiz rejim, lekin Viewer parolsiz (`ask`): ruxsat oynasi, so'ng talab bo'yicha Host'ning
     // tuzi bilan olingan bir martalik parol ishlaydi
@@ -209,7 +209,7 @@ async fn relay_end_to_end() {
     .await;
     b.reply(&sid, true);
     let relayed = timeout(Duration::from_secs(8), rx).await.unwrap().unwrap().expect("ruxsat berilishi kerak");
-    let pw = relayed.pw.clone().expect("parolsiz so'rovga bir martalik parol keladi");
+    let pw = relayed.pw.clone().expect("kalitsiz so'rovga bir martalik kalit keladi");
     ping_through(relayed, &b_id, &pw, &dir).await;
     b.policy.lock().unwrap().ensure_host = None;
 

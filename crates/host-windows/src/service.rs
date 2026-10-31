@@ -56,15 +56,15 @@ pub async fn run_cli() -> Result<()> {
 }
 
 fn set_password() -> Result<()> {
-    let p1 = rpassword::prompt_password("Yangi parol (kamida 8 belgi): ")?;
-    let p2 = rpassword::prompt_password("Parolni takrorlang: ")?;
+    let p1 = rpassword::prompt_password("Yangi kalit (kamida 8 belgi): ")?;
+    let p2 = rpassword::prompt_password("Kalitni takrorlang: ")?;
     if p1 != p2 {
-        bail!("parollar mos kelmadi");
+        bail!("kalitlar mos kelmadi");
     }
     let creds = Credentials::from_password(&p1)?;
     let path = paths::host_password_file()?;
     creds.save(&path)?;
-    println!("Parol saqlandi: {}", path.display());
+    println!("Kalit saqlandi: {}", path.display());
     Ok(())
 }
 
@@ -95,7 +95,7 @@ fn bind_host(ip: IpAddr, port: u16, creds: Option<Credentials>) -> Result<Host> 
     let creds = match creds {
         Some(c) => c,
         None => Credentials::load(&paths::host_password_file()?)
-            .context("parol o'rnatilmagan: \"Bu kompyuter\" bo'limida yoki `host-windows set-password` bilan o'rnating")?,
+            .context("kalit o'rnatilmagan: \"Sozlamalar\" bo'limida yoki `host-windows set-password` bilan o'rnating")?,
     };
     let caps = Capabilities { codecs: CODEC_H264, max_fps: 60, monitors: vec![] };
     Host::bind(SocketAddr::new(ip, port), &identity, creds, caps)

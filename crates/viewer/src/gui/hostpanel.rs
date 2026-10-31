@@ -181,13 +181,13 @@ impl HostPanel {
                         " Host xizmatini qayta ishga tushirib bo'lmadi: `systemctl --user restart remote-desktop-host`."
                     }
                 } else {
-                    " Host xizmati ishlamayapti: parol keyingi ishga tushishda ishlatiladi."
+                    " Host xizmati ishlamayapti: kalit keyingi ishga tushishda ishlatiladi."
                 };
                 #[cfg(windows)]
-                let note = if self.win.restart_if_running() { " Host qayta ishga tushirildi." } else { " Host ishlamayapti: parol keyingi yoqilganda ishlatiladi." };
+                let note = if self.win.restart_if_running() { " Host qayta ishga tushirildi." } else { " Host ishlamayapti: kalit keyingi yoqilganda ishlatiladi." };
                 #[cfg(not(any(target_os = "linux", windows)))]
                 let note = "";
-                self.message = Some((true, format!("Parol saqlandi.{note}")));
+                self.message = Some((true, format!("Kalit saqlandi.{note}")));
             }
             Err(e) => self.message = Some((false, format!("{e:#}"))),
         }
@@ -293,8 +293,7 @@ impl HostPanel {
         #[cfg(target_os = "linux")]
         let svc_installed = self.svc.as_ref().map_or(false, |s| s.2);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.set_max_width(theme::PAGE_W);
-            theme::page_title(ui, "Bu kompyuter", &["Boshqa kompyuterlar shu manzil, port va parol bilan ulana oladi."]);
+            theme::page_title(ui, "Sozlamalar", &["Boshqa kompyuterlar shu manzil, port va kalit bilan ulana oladi."]);
 
             theme::card(ui, Some("HOLAT"), |ui| {
                 ui.horizontal(|ui| {
@@ -318,9 +317,9 @@ impl HostPanel {
                         theme::chip(ui, "Host mavjud emas", theme::DIM);
                     }
                     if Self::password_is_set() {
-                        theme::chip(ui, "Parol o'rnatilgan", theme::GOOD);
+                        theme::chip(ui, "Kalit o'rnatilgan", theme::GOOD);
                     } else {
-                        theme::chip(ui, "Parol o'rnatilmagan", theme::BAD);
+                        theme::chip(ui, "Kalit o'rnatilmagan", theme::BAD);
                     }
                 });
                 ui.add_space(8.0);
@@ -374,7 +373,7 @@ impl HostPanel {
                         theme::toggle(ui, &mut self.autologin, "Kompyuter yonganda avtomatik kirish (GDM)");
                         ui.add_space(4.0);
                         if !pw_ok {
-                            ui.label(RichText::new("Avval pastda ulanish parolini o'rnating.").color(theme::WARN));
+                            ui.label(RichText::new("Avval pastda ulanish kalitini o'rnating.").color(theme::WARN));
                         }
                         if theme::accent_button(ui, "Ulanishga ruxsat berish", egui::vec2(220.0, 34.0), pw_ok).clicked() {
                             self.start_install();
@@ -446,7 +445,7 @@ impl HostPanel {
                 }
             });
 
-            theme::card(ui, Some("PAROL"), |ui| {
+            theme::card(ui, Some("KALIT"), |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
                         theme::input(&mut self.new_password)
@@ -464,7 +463,7 @@ impl HostPanel {
                 });
                 ui.add_space(4.0);
                 let ok_len = self.new_password.chars().count() >= MIN_PASSWORD_LEN;
-                if theme::accent_button(ui, "Parolni saqlash", egui::vec2(160.0, 34.0), ok_len).clicked() {
+                if theme::accent_button(ui, "Kalitni saqlash", egui::vec2(160.0, 34.0), ok_len).clicked() {
                     self.save_password();
                 }
                 if let Some((ok, text)) = &self.message {
@@ -487,7 +486,7 @@ impl HostPanel {
                             ui.ctx().output_mut(|o| o.copied_text = last.clone());
                         }
                     });
-                    theme::hint(ui, "Parol faqat xesh ko'rinishida saqlanadi; bu yerda dastur yopilguncha ko'rinadi.");
+                    theme::hint(ui, "Kalit faqat xesh ko'rinishida saqlanadi; bu yerda dastur yopilguncha ko'rinadi.");
                 }
             });
         });

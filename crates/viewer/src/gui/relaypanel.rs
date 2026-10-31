@@ -3,7 +3,7 @@
 //! so'rov dialogi. Hammasi `rdcore::relay` ustida.
 
 use super::{ondemand, firewall, theme};
-use egui::{Align2, Key, RichText, Ui};
+use egui::{Align, Align2, Key, Layout, RichText, Ui};
 use rdcore::{
     auth::Credentials,
     cert::HostIdentity,
@@ -412,12 +412,7 @@ impl RelayPanel {
                     self.cfg.save();
                 }
                 AgentEvent::Presence { id, online, name } => {
-                    if let Some(c) = self.contacts.iter_mut().find(|c| c.id == id) {
-                        if c.name.is_empty() && !name.is_empty() {
-                            c.name = name.clone();
-                            save_contacts(&self.contacts);
-                        }
-                    }
+                    // Kompyuterning o'z nomi faqat maslahat sifatida ko'rsatiladi; kontakt nomini foydalanuvchi kiritadi
                     self.presence.insert(id, (online, name));
                 }
                 AgentEvent::Incoming { sid, from, name } => {
@@ -486,39 +481,105 @@ impl RelayPanel {
 
     // --- UI -----------------------------------------------------------------------------------
 
-    /// Kontaktlar (chap panel uchun): `(id, nom)`, onlayn holati bilan.
-    fn contact_label(&self, c: &Contact) -> String {
-        if c.name.is_empty() {
-            relay::pretty_id(&c.id)
-        } else {
-            c.name.clone()
-        }
-    }
-
     /// `quality`: ulanish kartasidan oldin chiziladigan sifat tanlash kartasi.
     pub fn ui(&mut self, ui: &mut Ui, quality: &mut dyn FnMut(&mut Ui)) -> Option<ConnectRequest> {
         let mut request = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.set_max_width(theme::PAGE_W);
-            theme::page_title(ui, "Server orqali", &["Boshqa kompyuterning 9 xonali ID sini kiriting. Ruxsat berilgach ulanasiz."]);
+            // Sarlavha va (ID olingan bo'lsa) shu kompyuterning ID'si: onlayn bo'lsa yashil, bosilsa nusxalanadi
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Server orqali").size(22.0).strong().color(theme::TEXT));
+                if !self.cfg.id.is_empty() {
+                    ui.add_space(12.0);
+                    let color = if self.online { theme::GOOD } else { theme::DIM };
+                    let text = RichText::new(format!("ID {}", relay::pretty_id(&self.cfg.id))).monospace().size(18.0).strong().color(color);
+                    let r = ui.add(egui::Label::new(text).sense(egui::Sense::click())).on_hover_text("Nusxalash uchun bosing");
+                    if r.clicked() {
+                        ui.ctx().output_mut(|o| o.copied_text = self.cfg.id.clone());
+                    }
+                }
+            });
+            ui.add_space(14.0);
             quality(ui);
             request = self.card_connect(ui);
-            self.card_contacts(ui);
             self.card_this_pc(ui);
         });
         request
     }
 
+    /// Chap panel: "Oldin ulanganlar". Har bir ID ostida ixtiyoriy nom kiritiladi. Bosish — ID formaga
+    /// qo'yiladi, ikki marta bosish — darhol ulanadi.
+    pub fn ui_side(&mut self, ui: &mut Ui) -> Option<ConnectRequest> {
+        let mut pick: Option<(String, bool)> = None;
+        let mut delete: Option<usize> = None;
+        let mut renamed = false;
+        let selected = relay::normalize_id(&self.target);
+        ui.label(RichText::new("OLDIN ULANGANLAR").size(11.0).color(theme::DIM).strong());
+        ui.add_space(6.0);
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            if self.contacts.is_empty() {
+                theme::hint(ui, "Hozircha yo'q. Muvaffaqiyatli ulanishdan keyin ID shu yerda saqlanadi.");
+            }
+            for (i, c) in self.contacts.iter_mut().enumerate() {
+                let (on, pc_name) = self.presence.get(&c.id).map_or((false, ""), |p| (p.0, p.1.as_str()));
+                let is_sel = selected == c.id;
+                egui::Frame::none()
+                    .fill(if is_sel { theme::ACCENT.gamma_multiply(0.22) } else { theme::CARD })
+                    .stroke(egui::Stroke::new(1.0, if is_sel { theme::ACCENT } else { theme::BORDER }))
+                    .rounding(egui::Rounding::same(10.0))
+                    .inner_margin(egui::Margin::same(10.0))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            theme::dot(ui, if on { theme::GOOD } else { theme::DIM });
+                            let id = RichText::new(relay::pretty_id(&c.id)).monospace().size(15.0).strong().color(theme::TEXT);
+                            let r = ui
+                                .add(egui::Label::new(id).sense(egui::Sense::click()))
+                                .on_hover_text(if on { "Onlayn. Ikki marta bosing — ulanish" } else { "Oflayn" });
+                            if r.double_clicked() {
+                                pick = Some((c.id.clone(), true));
+                            } else if r.clicked() {
+                                pick = Some((c.id.clone(), false));
+                            }
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                let x = ui.add(egui::Button::new(RichText::new("×").color(theme::DIM)).frame(false));
+                                if x.on_hover_text("Ro'yxatdan o'chirish").clicked() {
+                                    delete = Some(i);
+                                }
+                            });
+                        });
+                        let hint = if pc_name.is_empty() { "nom (ixtiyoriy)" } else { pc_name };
+                        if ui.add(theme::input(&mut c.name).hint_text(hint).desired_width(f32::INFINITY)).changed() {
+                            renamed = true;
+                        }
+                    });
+                ui.add_space(6.0);
+            }
+        });
+        if renamed {
+            save_contacts(&self.contacts);
+        }
+        if let Some(i) = delete {
+            self.contacts.remove(i);
+            save_contacts(&self.contacts);
+            self.subscribe();
+        }
+        let (id, connect) = pick?;
+        self.target = relay::pretty_id(&id);
+        (connect && self.online).then(|| {
+            self.error = None;
+            ConnectRequest { id, password: self.password.clone() }
+        })
+    }
+
     /// "HOST" bo'limi: bu kompyuter relay serveri bo'lishi.
     pub fn ui_server(&mut self, ui: &mut Ui) {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.set_max_width(theme::PAGE_W);
             theme::page_title(
                 ui,
                 "HOST: server rejimi",
                 &[
                     "Bu kompyuter boshqa kompyuterlarni bir-biriga ulab beruvchi server bo'ladi (\"Server orqali\" bo'limi uchun).",
-                    "Eslatma: \"Bu kompyuter\" bo'limi esa shu kompyuterning o'zini P2P uchun ochadi, bu boshqa narsa.",
+                    "Eslatma: \"Sozlamalar\" bo'limi esa shu kompyuterning o'zini P2P uchun ochadi, bu boshqa narsa.",
                 ],
             );
             self.card_server(ui);
@@ -542,11 +603,10 @@ impl RelayPanel {
                 );
                 enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                 ui.end_row();
-                ui.label(theme::dim("Parol"));
-                ui.add(theme::input(&mut self.password).password(true).hint_text("qarovsiz parol (agar kerak bo'lsa)"));
+                ui.label(theme::dim("Kalit"));
+                ui.add(theme::input(&mut self.password).password(true).hint_text("agar kerak bo'lsa"));
                 ui.end_row();
             });
-            theme::hint(ui, "Parol: o'sha kompyuterning qarovsiz paroli (ruxsat so'ramasdan ulanish uchun). Bo'sh qoldirsangiz, u kompyuterda ruxsat oynasi chiqadi.");
             ui.add_space(6.0);
             if let Some(e) = &self.error {
                 theme::error_banner(ui, e);
@@ -563,38 +623,6 @@ impl RelayPanel {
             }
         });
         request
-    }
-
-    fn card_contacts(&mut self, ui: &mut Ui) {
-        let mut pick: Option<String> = None;
-        let mut delete: Option<usize> = None;
-        theme::card(ui, Some("KONTAKTLAR"), |ui| {
-            if self.contacts.is_empty() {
-                theme::hint(ui, "Muvaffaqiyatli ulanishdan keyin ID shu yerda saqlanadi.");
-            }
-            for (i, c) in self.contacts.iter().enumerate() {
-                let on = self.presence.get(&c.id).is_some_and(|p| p.0);
-                ui.horizontal(|ui| {
-                    theme::dot(ui, if on { theme::GOOD } else { theme::DIM });
-                    if ui.link(RichText::new(self.contact_label(c)).strong()).clicked() {
-                        pick = Some(c.id.clone());
-                    }
-                    ui.label(RichText::new(relay::pretty_id(&c.id)).monospace().size(12.0).color(theme::DIM));
-                    ui.label(theme::dim(if on { "onlayn" } else { "oflayn" }));
-                    if theme::button(ui, "×").clicked() {
-                        delete = Some(i);
-                    }
-                });
-            }
-        });
-        if let Some(id) = pick {
-            self.target = relay::pretty_id(&id);
-        }
-        if let Some(i) = delete {
-            self.contacts.remove(i);
-            save_contacts(&self.contacts);
-            self.subscribe();
-        }
     }
 
     fn card_this_pc(&mut self, ui: &mut Ui) {
@@ -653,13 +681,13 @@ impl RelayPanel {
             if ui.radio_value(&mut self.cfg.unattended, false, "Har safar ruxsat so'rash (30 soniyadan keyin rad etiladi)").changed() {
                 policy_changed = true;
             }
-            if ui.radio_value(&mut self.cfg.unattended, true, "Qarovsiz: ruxsat so'ramasdan, alohida parol bilan").changed() {
+            if ui.radio_value(&mut self.cfg.unattended, true, "Qarovsiz: ruxsat so'ramasdan, alohida kalit bilan").changed() {
                 policy_changed = true;
             }
             if self.cfg.unattended {
                 ui.horizontal(|ui| {
                     ui.add_space(26.0);
-                    let hint = if ondemand::has_password() { "saqlangan (yangisini kiriting)" } else { "parol (kamida 8 belgi)" };
+                    let hint = if ondemand::has_password() { "saqlangan (yangisini kiriting)" } else { "kalit (kamida 8 belgi)" };
                     ui.add(theme::input(&mut self.unattended_pw).password(true).hint_text(hint));
                     if theme::button(ui, "Saqlash").clicked() {
                         save_pw = true;
@@ -667,15 +695,13 @@ impl RelayPanel {
                 });
                 match (&self.unattended_msg, ondemand::has_password()) {
                     (Some((ok, m)), _) => theme::note(ui, m, if *ok { theme::GOOD } else { theme::WARN }),
-                    (None, true) => theme::note(ui, "Parol saqlangan.", theme::GOOD),
-                    (None, false) => theme::note(ui, "Parol o'rnatilmaguncha so'rovlar har safar ruxsat bilan qabul qilinadi.", theme::WARN),
+                    (None, true) => theme::note(ui, "Kalit saqlangan.", theme::GOOD),
+                    (None, false) => theme::note(ui, "Kalit o'rnatilmaguncha so'rovlar har safar ruxsat bilan qabul qilinadi.", theme::WARN),
                 }
                 theme::hint(
                     ui,
-                    "Bu parol faqat ID orqali qarovsiz ulanish uchun. Host paroli va \"Ulanishga ruxsat berish\" dan mustaqil: kompyuter serverga ulangan bo'lsa yetarli.",
+                    "Bu kalit faqat ID orqali qarovsiz ulanish uchun. Host kaliti va \"Ulanishga ruxsat berish\" dan mustaqil: kompyuter serverga ulangan bo'lsa yetarli.",
                 );
-            } else {
-                theme::hint(ui, "Har bir ulanishga bir martalik parol beriladi; Host kerak bo'lsa o'zi ishga tushadi.");
             }
             if !self.trusted.is_empty() {
                 ui.add_space(6.0);
@@ -717,7 +743,7 @@ impl RelayPanel {
                 Ok(()) => {
                     self.unattended_pw.clear();
                     self.ondemand.stop();
-                    self.unattended_msg = Some((true, "Parol saqlandi.".into()));
+                    self.unattended_msg = Some((true, "Kalit saqlandi.".into()));
                     policy_changed = true;
                 }
                 Err(e) => self.unattended_msg = Some((false, format!("{e:#}"))),
@@ -747,7 +773,7 @@ impl RelayPanel {
                 self.save_server();
             }
             if !self.server_keyed {
-                theme::hint(ui, "Kalitsiz: server manzilini bilgan har kim ro'yxatdan o'tadi va server trafigidan foydalanadi. Ulanish baribir qabul qiluvchining ruxsati yoki parolini talab qiladi.");
+                theme::hint(ui, "Kalitsiz: server manzilini bilgan har kim ro'yxatdan o'tadi va server trafigidan foydalanadi. Ulanish baribir qabul qiluvchining ruxsati yoki kalitini talab qiladi.");
             }
             ui.add_space(4.0);
             theme::form(ui, "relay_srv", |ui| {

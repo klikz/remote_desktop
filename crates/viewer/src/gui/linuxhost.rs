@@ -202,7 +202,7 @@ fn run(tx: &Sender<Msg>, autologin: bool) -> Result<(), String> {
     let data = HOST_BIN.ok_or("Bu dastur Host faylisiz yig'ilgan (RD_HOST_BIN berilmagan)")?;
     let password_file = rdcore::paths::host_password_file().map_err(|e| format!("{e:#}"))?;
     if !password_file.exists() {
-        return Err("Avval ulanish parolini o'rnating".into());
+        return Err("Avval ulanish kalitini o'rnating".into());
     }
 
     step(tx, "1/5  Kerakli paketlar tekshirilmoqda");

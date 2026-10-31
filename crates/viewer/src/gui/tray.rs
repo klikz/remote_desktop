@@ -46,27 +46,10 @@ pub struct Tray {
     last: String,
 }
 
-/// 32x32: ko'k doira ichida oq monitor belgisi.
+/// 32x32: dastur ikonkasi (`icon_draw`).
 fn make_icon() -> Option<Icon> {
     const N: u32 = 32;
-    let mut rgba = Vec::with_capacity((N * N * 4) as usize);
-    for y in 0..N {
-        for x in 0..N {
-            let (dx, dy) = (x as f32 - 15.5, y as f32 - 15.5);
-            let inside = dx * dx + dy * dy <= 15.0 * 15.0;
-            let screen = (8..24).contains(&x) && (9..21).contains(&y) && !((10..22).contains(&x) && (11..19).contains(&y));
-            let stand = (13..19).contains(&x) && (22..24).contains(&y);
-            let px = if !inside {
-                [0, 0, 0, 0]
-            } else if screen || stand {
-                [255, 255, 255, 255]
-            } else {
-                [56, 120, 230, 255]
-            };
-            rgba.extend_from_slice(&px);
-        }
-    }
-    Icon::from_rgba(rgba, N, N).ok()
+    Icon::from_rgba(crate::icon_draw::icon_rgba(N), N, N).ok()
 }
 
 impl Tray {

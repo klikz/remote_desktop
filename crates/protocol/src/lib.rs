@@ -33,7 +33,7 @@ pub mod reason {
     pub fn describe(code: u8) -> &'static str {
         match code {
             OK => "ok",
-            BAD_PASSWORD => "noto'g'ri parol",
+            BAD_PASSWORD => "noto'g'ri kalit",
             BLOCKED => "ko'p noto'g'ri urinish, vaqtincha bloklangan",
             VERSION_MISMATCH => "protokol versiyasi mos kelmaydi",
             REJECTED => "Host ulanishni rad etdi",
