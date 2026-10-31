@@ -256,9 +256,10 @@ impl App {
     /// Server (relay) orqali ID ga ulanadi. Sifat sozlamalari "Ulanish" bo'limidagi formadan olinadi.
     fn connect_relay(&mut self, ctx: &egui::Context, req: relaypanel::ConnectRequest) {
         let Some(connector) = self.relay.connector() else {
-            self.error = Some("Server bilan aloqa yo'q".into());
+            self.relay.set_error(Some("Server bilan aloqa yo'q".into()));
             return;
         };
+        self.relay.set_error(None);
         let f = &self.form;
         self.error = None;
         self.fingerprint.clear();
@@ -352,11 +353,17 @@ impl App {
         if let Some(msg) = ended {
             let was_viewing = self.screen == Screen::Viewing;
             self.disconnect(ctx);
-            self.error = match msg {
+            let err = match msg {
                 Some(m) => Some(m),
                 None if was_viewing => Some("Ulanish yopildi".into()),
                 None => None,
             };
+            // ID orqali ulanishda xato "Server orqali" bo'limida ko'rinadi (P2P formasida emas)
+            if self.relay_target.is_some() {
+                self.relay.set_error(err);
+            } else {
+                self.error = err;
+            }
         }
     }
 

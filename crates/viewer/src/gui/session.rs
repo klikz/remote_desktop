@@ -143,15 +143,16 @@ async fn run(
 
     let mut session = match &p.relay {
         Some((id, connector)) => {
-            // Server qabul qiluvchidan ruxsat so'raydi (u 30 soniya o'ylaydi)
+            // Server qabul qiluvchidan ruxsat so'raydi (u 30 soniya o'ylaydi). Parol kiritilmagan bo'lsa
+            // qarovsiz kompyuter ham ruxsat oynasini ko'rsatadi va bir martalik parol beradi.
             let relayed = connector
-                .connect(id)
+                .connect_ask(id, p.password.is_empty())
                 .await
                 .map_err(|_| anyhow::anyhow!("relay agenti to'xtagan"))?
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             let password = relayed.pw.clone().unwrap_or_else(|| p.password.clone());
             if password.is_empty() {
-                anyhow::bail!("bu kompyuter qarovsiz rejimda: qarovsiz parolni kiriting");
+                anyhow::bail!("Host parol bermadi: parolni kiriting");
             }
             connect_relayed(
                 ConnectOptions { addr: relayed.local, password: &password, known_hosts: &known_hosts, confirm_new_host: &confirm },

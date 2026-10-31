@@ -300,6 +300,11 @@ impl RelayPanel {
         self.agent.as_ref().map(Agent::connector)
     }
 
+    /// "Server orqali" bo'limida ko'rsatiladigan xato (masalan, ID orqali ulanish tugagani sababi).
+    pub fn set_error(&mut self, e: Option<String>) {
+        self.error = e;
+    }
+
     pub fn is_online(&self) -> bool {
         self.online
     }
@@ -540,7 +545,7 @@ impl RelayPanel {
                 ui.add(egui::TextEdit::singleline(&mut self.password).password(true).desired_width(200.0).hint_text("qarovsiz parol (agar kerak bo'lsa)"));
                 ui.end_row();
             });
-            theme::hint(ui, "Parol: agar u kompyuter ruxsat so'ramasdan (qarovsiz) qabul qilsa, o'sha kompyuterda belgilangan qarovsiz parolni kiriting.");
+            theme::hint(ui, "Parol: o'sha kompyuterning qarovsiz paroli (ruxsat so'ramasdan ulanish uchun). Bo'sh qoldirsangiz, u kompyuterda ruxsat oynasi chiqadi.");
             ui.add_space(6.0);
             if let Some(e) = &self.error {
                 theme::error_banner(ui, e);

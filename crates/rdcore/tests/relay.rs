@@ -179,10 +179,11 @@ async fn relay_end_to_end() {
     let ensure: rdcore::relay::agent::EnsureHost = std::sync::Arc::new(move || {
         let _guard = rt.enter();
         let creds = Credentials::from_password(UNATT_PW)?;
+        let salt = creds.salt;
         let h = Host::bind("127.0.0.1:0".parse().unwrap(), &HostIdentity::generate()?, creds, caps())?;
         let port = h.local_addr()?.port();
         tokio::spawn(h.run());
-        Ok(port)
+        Ok((port, salt))
     });
     let _ = std::fs::remove_file(dir.join("kh-viewer")); // yangi Host: boshqa sertifikat
     b.policy.lock().unwrap().ensure_host = Some(ensure);
@@ -196,6 +197,20 @@ async fn relay_end_to_end() {
     )
     .await;
     assert!(wrong.is_err(), "Host paroli qarovsiz Host'da ishlamasligi kerak");
+
+    // 3c) Qarovsiz rejim, lekin Viewer parolsiz (`ask`): ruxsat oynasi, so'ng talab bo'yicha Host'ning
+    // tuzi bilan olingan bir martalik parol ishlaydi
+    let _ = std::fs::remove_file(dir.join("kh-viewer"));
+    let rx = a.connector().connect_ask(&b_id, true);
+    let (sid, _) = wait_event(&b, |e| match e {
+        AgentEvent::Incoming { sid, from, .. } => Some((sid, from)),
+        _ => None,
+    })
+    .await;
+    b.reply(&sid, true);
+    let relayed = timeout(Duration::from_secs(8), rx).await.unwrap().unwrap().expect("ruxsat berilishi kerak");
+    let pw = relayed.pw.clone().expect("parolsiz so'rovga bir martalik parol keladi");
+    ping_through(relayed, &b_id, &pw, &dir).await;
     b.policy.lock().unwrap().ensure_host = None;
 
     // 4) Yo'q ID va oflayn

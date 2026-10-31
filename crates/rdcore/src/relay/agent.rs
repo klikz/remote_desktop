@@ -47,7 +47,8 @@ pub struct AgentConfig {
 }
 
 /// Talab bo'yicha Host ishga tushiruvchi (bloklovchi; `spawn_blocking` ichida chaqiriladi).
-pub type EnsureHost = Arc<dyn Fn() -> Result<u16> + Send + Sync>;
+/// Natija: Host'ning UDP porti va uning parol tuzi (bir martalik parol shu tuz bilan olinadi).
+pub type EnsureHost = Arc<dyn Fn() -> Result<(u16, [u8; protocol::SALT_LEN])> + Send + Sync>;
 
 /// Kiruvchi so'rovlarga munosabat (UI o'zgartirib turadi).
 #[derive(Default)]
@@ -56,7 +57,8 @@ pub struct Policy {
     pub unattended: bool,
     /// Ishonchli ID'lar: dialogsiz, bir martalik parol bilan qabul qilinadi.
     pub trusted: HashSet<String>,
-    /// Qarovsiz qabulda chaqiriladi: parol bilan alohida Host'ni (kerak bo'lsa) ishga tushirib, uning portini qaytaradi.
+    /// Har qabul qilingan so'rovda chaqiriladi: alohida Host'ni (kerak bo'lsa) ishga tushirib, porti va tuzini
+    /// qaytaradi. `None`: mahalliy doimiy Host (`host_port`, Host paroli) ishlatiladi.
     pub ensure_host: Option<EnsureHost>,
 }
 
@@ -288,9 +290,7 @@ async fn session(
                             let p = policy.lock().unwrap_or_else(|e| e.into_inner());
                             // `ask`: Viewer qarovsiz parolsiz keldi — dialog (yoki ishonchli ID) orqali bir martalik parol
                             let unattended = p.unattended && !ask;
-                            // Qarovsiz rejim yoqilgan bo'lsa Host har doim alohida (qarovsiz) Host bo'ladi
-                            let ensure = if p.unattended { p.ensure_host.clone() } else { None };
-                            (unattended || p.trusted.contains(&from), unattended, ensure)
+                            (unattended || p.trusted.contains(&from), unattended, p.ensure_host.clone())
                         };
                         if auto {
                             accept(&conn, &mut send, &sid, &from, !unattended, cfg.host_port, ensure).await?;
@@ -356,25 +356,34 @@ async fn accept(
     mut host_port: Option<u16>,
     ensure: Option<EnsureHost>,
 ) -> Result<()> {
-    let had_ensure = ensure.is_some();
+    // Alohida Host (talab bo'yicha) ishlatilsa, bir martalik kalit uning tuzi bilan olinadi
+    let mut salt = None;
     if let Some(ensure) = ensure {
-        // Qarovsiz: alohida parolli Host kerak bo'lsa shu yerda ishga tushadi
         match tokio::task::spawn_blocking(move || ensure()).await {
-            Ok(Ok(port)) => host_port = Some(port),
+            Ok(Ok((port, s))) => {
+                host_port = Some(port);
+                salt = Some(s);
+            }
             other => {
                 let e = match other { Ok(Err(e)) => format!("{e:#}"), Err(e) => e.to_string(), Ok(Ok(_)) => String::new() };
-                eprintln!("[agent] qarovsiz Host ishga tushmadi: {e}");
-                write_msg(send, &RMsg::Reply { sid: sid.to_string(), accept: false, pw: None }).await?;
-                return Ok(());
+                eprintln!("[agent] Host ishga tushmadi: {e}");
+                // Bir martalik parolli qabulda mahalliy doimiy Host'ga (bo'lsa) o'tiladi; qarovsizda iloji yo'q
+                if !one_time {
+                    write_msg(send, &RMsg::Reply { sid: sid.to_string(), accept: false, pw: None }).await?;
+                    return Ok(());
+                }
             }
         }
     }
     let pw = if one_time {
-        // Alohida (qarovsiz) Host ishlatilsa, bir martalik kalit shu Host'ning tuzi bilan olinadi
-        let pw_file = if had_ensure { paths::unattended_file()? } else { paths::host_password_file()? };
-        let made = Credentials::load(&pw_file)
-            .context("Host paroli o'rnatilmagan")
-            .and_then(|c| onetime::create(&c.salt));
+        let salt = match salt {
+            Some(s) => Ok(s),
+            None => paths::host_password_file()
+                .and_then(|p| Credentials::load(&p))
+                .map(|c| c.salt)
+                .context("Host paroli o'rnatilmagan"),
+        };
+        let made = salt.and_then(|s| onetime::create(&s));
         match made {
             Ok(p) => Some(p),
             Err(e) => {
