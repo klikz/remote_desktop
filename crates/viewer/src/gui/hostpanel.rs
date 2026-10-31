@@ -293,10 +293,8 @@ impl HostPanel {
         #[cfg(target_os = "linux")]
         let svc_installed = self.svc.as_ref().map_or(false, |s| s.2);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.set_max_width(640.0);
-            ui.label(RichText::new("Bu kompyuter").size(20.0).strong());
-            theme::hint(ui, "Boshqa kompyuterlar shu manzil, port va parol bilan ulana oladi.");
-            ui.add_space(12.0);
+            ui.set_max_width(theme::PAGE_W);
+            theme::page_title(ui, "Bu kompyuter", &["Boshqa kompyuterlar shu manzil, port va parol bilan ulana oladi."]);
 
             theme::card(ui, Some("HOLAT"), |ui| {
                 ui.horizontal(|ui| {
@@ -328,9 +326,9 @@ impl HostPanel {
                 ui.add_space(8.0);
                 let addr = format!("{}:{}", self.ip, paths::read_host_port().unwrap_or(protocol::DEFAULT_PORT));
                 ui.horizontal(|ui| {
-                    ui.label(theme::dim("Manzil"));
+                    theme::row_label(ui, "Manzil");
                     ui.label(RichText::new(&addr).monospace().size(16.0).strong());
-                    if ui.small_button("Nusxa").clicked() {
+                    if theme::button(ui, "Nusxa").clicked() {
                         ui.ctx().output_mut(|o| o.copied_text = addr.clone());
                     }
                 });
@@ -340,8 +338,8 @@ impl HostPanel {
                         let split = fp[..half].rfind(':').map(|i| i + 1).unwrap_or(half);
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
-                            ui.label(theme::dim("Fingerprint"));
-                            if ui.small_button("Nusxa").clicked() {
+                            theme::row_label(ui, "Fingerprint");
+                            if theme::button(ui, "Nusxa").clicked() {
                                 ui.ctx().output_mut(|o| o.copied_text = fp.clone());
                             }
                         });
@@ -373,7 +371,7 @@ impl HostPanel {
                     if embedded {
                         theme::hint(ui, "Host hali o'rnatilmagan. Tugma kerakli paketlarni o'rnatadi va xizmatni yoqadi.");
                         ui.add_space(4.0);
-                        ui.checkbox(&mut self.autologin, "Kompyuter yonganda avtomatik kirish (GDM)");
+                        theme::toggle(ui, &mut self.autologin, "Kompyuter yonganda avtomatik kirish (GDM)");
                         ui.add_space(4.0);
                         if !pw_ok {
                             ui.label(RichText::new("Avval pastda ulanish parolini o'rnating.").color(theme::WARN));
@@ -389,7 +387,7 @@ impl HostPanel {
                 } else {
                     let mut on = matches!(svc.as_deref(), Some("active") | Some("activating"));
                     let label = if on { "Ulanishga ruxsat berilgan" } else { "Ulanishga ruxsat berish" };
-                    if ui.checkbox(&mut on, label).changed() {
+                    if theme::toggle(ui, &mut on, label).changed() {
                         self.set_service(on);
                     }
                     theme::hint(ui, "Yoqilsa, Host kompyuter ishga tushganda ham o'zi yonadi.");
@@ -399,7 +397,7 @@ impl HostPanel {
                             theme::chip(ui, "Avtomatik kirish yoqilgan", theme::GOOD);
                         } else {
                             theme::chip(ui, "Avtomatik kirish o'chiq", theme::WARN);
-                            if ui.small_button("Yoqish").clicked() {
+                            if theme::button(ui, "Yoqish").clicked() {
                                 self.svc_msg = None;
                                 self.install_step = "Avtomatik kirish yoqilmoqda".into();
                                 self.install_rx = Some(super::linuxhost::spawn_autologin());
@@ -425,7 +423,7 @@ impl HostPanel {
                         egui::ScrollArea::vertical().id_salt("svc_log").max_height(160.0).show(ui, |ui| {
                             ui.label(RichText::new(rest).monospace().size(11.0).color(theme::DIM));
                         });
-                        if ui.small_button("Logni nusxalash").clicked() {
+                        if theme::button(ui, "Logni nusxalash").clicked() {
                             ui.ctx().output_mut(|o| o.copied_text = text.clone());
                         }
                     }
@@ -434,45 +432,44 @@ impl HostPanel {
 
             theme::card(ui, Some("PORT (UDP VA TCP)"), |ui| {
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.port_text).desired_width(80.0));
-                    if ui.button("Saqlash").clicked() {
+                    ui.add(theme::input(&mut self.port_text).desired_width(80.0));
+                    if theme::button(ui, "Saqlash").clicked() {
                         self.save_port();
                     }
-                    if ui.button(format!("Standart ({})", protocol::DEFAULT_PORT)).clicked() {
+                    if theme::button(ui, format!("Standart ({})", protocol::DEFAULT_PORT)).clicked() {
                         self.port_text = protocol::DEFAULT_PORT.to_string();
                     }
                 });
                 if let Some((ok, text)) = &self.port_msg {
                     ui.add_space(4.0);
-                    ui.label(RichText::new(text).color(if *ok { theme::GOOD } else { theme::BAD }));
+                    theme::note(ui, text, if *ok { theme::GOOD } else { theme::BAD });
                 }
             });
 
             theme::card(ui, Some("PAROL"), |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.new_password)
+                        theme::input(&mut self.new_password)
                             .password(!self.show_new)
-                            .desired_width(230.0)
                             .hint_text(format!("kamida {MIN_PASSWORD_LEN} belgi")),
                     );
                     let eye = if self.show_new { "Yashirish" } else { "Ko'rsatish" };
-                    if ui.small_button(eye).clicked() {
+                    if theme::button(ui, eye).clicked() {
                         self.show_new = !self.show_new;
                     }
-                    if ui.button("Tasodifiy").clicked() {
+                    if theme::button(ui, "Tasodifiy").clicked() {
                         self.new_password = random_password();
                         self.show_new = true;
                     }
                 });
                 ui.add_space(4.0);
                 let ok_len = self.new_password.chars().count() >= MIN_PASSWORD_LEN;
-                if theme::accent_button(ui, "Parolni saqlash", egui::vec2(150.0, 32.0), ok_len).clicked() {
+                if theme::accent_button(ui, "Parolni saqlash", egui::vec2(160.0, 34.0), ok_len).clicked() {
                     self.save_password();
                 }
                 if let Some((ok, text)) = &self.message {
                     ui.add_space(4.0);
-                    ui.label(RichText::new(text).color(if *ok { theme::GOOD } else { theme::BAD }));
+                    theme::note(ui, text, if *ok { theme::GOOD } else { theme::BAD });
                 }
                 if let Some(last) = self.last_set.clone() {
                     ui.add_space(8.0);
@@ -483,10 +480,10 @@ impl HostPanel {
                         } else {
                             ui.monospace("••••••••");
                         }
-                        if ui.small_button(if self.show_last { "Yashirish" } else { "Ko'rsatish" }).clicked() {
+                        if theme::button(ui, if self.show_last { "Yashirish" } else { "Ko'rsatish" }).clicked() {
                             self.show_last = !self.show_last;
                         }
-                        if ui.small_button("Nusxa").clicked() {
+                        if theme::button(ui, "Nusxa").clicked() {
                             ui.ctx().output_mut(|o| o.copied_text = last.clone());
                         }
                     });

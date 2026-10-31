@@ -47,13 +47,16 @@ const PRESETS: [(&str, u16, u32, u16); 5] = [
 ];
 const HEIGHTS: [(u16, &str); 5] = [(720, "720p"), (1080, "1080p"), (1440, "1440p"), (2160, "2160p"), (0, "Asl o'lcham")];
 
-/// Sifat shablonlari va qo'shimcha sozlamalar (P2P va "Server orqali" uchun umumiy).
+/// "SIFAT" kartasi: shablonlar va qo'shimcha sozlamalar (P2P va "Server orqali" uchun umumiy).
+fn quality_card(ui: &mut egui::Ui, salt: &str, fps: &mut u16, kbps: &mut u32, height: &mut u16) {
+    theme::card(ui, Some("SIFAT"), |ui| quality_picker(ui, salt, fps, kbps, height));
+}
+
 fn quality_picker(ui: &mut egui::Ui, salt: &str, fps: &mut u16, kbps: &mut u32, height: &mut u16) {
-    ui.label(theme::dim("Sifat"));
     let current = PRESETS.iter().find(|p| p.1 == *fps && p.2 == *kbps && p.3 == *height).map(|p| p.0);
     ui.horizontal_wrapped(|ui| {
         for p in PRESETS {
-            if ui.selectable_label(current == Some(p.0), p.0).clicked() {
+            if theme::pill(ui, current == Some(p.0), p.0).clicked() {
                 *fps = p.1;
                 *kbps = p.2;
                 *height = p.3;
@@ -61,7 +64,8 @@ fn quality_picker(ui: &mut egui::Ui, salt: &str, fps: &mut u16, kbps: &mut u32, 
         }
     });
     egui::CollapsingHeader::new("Qo'shimcha sozlamalar").id_salt((salt, "adv")).default_open(false).show(ui, |ui| {
-        egui::Grid::new((salt, "quality")).num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
+        ui.add_space(4.0);
+        egui::Grid::new((salt, "quality")).num_columns(2).spacing([14.0, 10.0]).min_col_width(theme::LABEL_W - 22.0).show(ui, |ui| {
             ui.label(theme::dim("FPS"));
             ui.add(egui::Slider::new(fps, 5..=60));
             ui.end_row();
@@ -70,7 +74,7 @@ fn quality_picker(ui: &mut egui::Ui, salt: &str, fps: &mut u16, kbps: &mut u32, 
             ui.end_row();
             ui.label(theme::dim("O'lcham"));
             let hname = HEIGHTS.iter().find(|h| h.0 == *height).map(|h| h.1).unwrap_or("Boshqa");
-            egui::ComboBox::from_id_salt((salt, "height")).selected_text(hname).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt((salt, "height")).width(160.0).selected_text(hname).show_ui(ui, |ui| {
                 for (v, n) in HEIGHTS {
                     ui.selectable_value(height, v, n);
                 }
@@ -409,11 +413,7 @@ impl App {
             let mut req = None;
             let form = &mut self.form;
             egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| {
-                req = self.relay.ui(ui, &mut |ui| {
-                    theme::card(ui, Some("SIFAT"), |ui| {
-                        quality_picker(ui, "relay", &mut form.fps, &mut form.kbps, &mut form.height);
-                    });
-                })
+                req = self.relay.ui(ui, &mut |ui| quality_card(ui, "relay", &mut form.fps, &mut form.kbps, &mut form.height))
             });
             if let Some(r) = req {
                 self.connect_relay(ctx, r);
@@ -480,38 +480,32 @@ impl App {
         // --- Ulanish formasi
         egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.set_max_width(620.0);
+                ui.set_max_width(theme::PAGE_W);
                 let title = match self.selected.and_then(|i| self.hosts.get(i)) {
                     Some(h) => h.name.clone(),
                     None => "Yangi ulanish".to_string(),
                 };
-                ui.label(RichText::new(title).size(20.0).strong());
-                theme::hint(ui, "Host manzili va parolini kiriting. Parol hech qayerda saqlanmaydi.");
-                ui.add_space(12.0);
+                theme::page_title(ui, &title, &["Host manzili va parolini kiriting. Parol hech qayerda saqlanmaydi."]);
 
                 let mut pw_enter = false;
                 theme::card(ui, Some("HOST"), |ui| {
-                    egui::Grid::new("form").num_columns(2).spacing([14.0, 10.0]).min_col_width(70.0).show(ui, |ui| {
+                    theme::form(ui, "form", |ui| {
                         ui.label(theme::dim("Nom"));
-                        ui.add(egui::TextEdit::singleline(&mut self.form.name).desired_width(330.0).hint_text("masalan: Ofis Ubuntu"));
+                        ui.add(theme::input(&mut self.form.name).hint_text("masalan: Ofis Ubuntu"));
                         ui.end_row();
                         ui.label(theme::dim("Manzil"));
                         ui.horizontal(|ui| {
-                            ui.add(egui::TextEdit::singleline(&mut self.form.addr).desired_width(220.0).hint_text("IP yoki nom"));
+                            ui.add(theme::input(&mut self.form.addr).hint_text("IP yoki nom").desired_width(theme::FIELD_W - 134.0));
                             ui.label(theme::dim("Port"));
-                            ui.add(egui::TextEdit::singleline(&mut self.form.port).desired_width(64.0));
+                            ui.add(theme::input(&mut self.form.port).desired_width(70.0));
                         });
                         ui.end_row();
                         ui.label(theme::dim("Parol"));
                         ui.horizontal(|ui| {
-                            let r = ui.add(
-                                egui::TextEdit::singleline(&mut self.form.password)
-                                    .password(!self.form.show_password)
-                                    .desired_width(240.0),
-                            );
+                            let r = ui.add(theme::input(&mut self.form.password).password(!self.form.show_password));
                             pw_enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                             let eye = if self.form.show_password { "Yashirish" } else { "Ko'rsatish" };
-                            if ui.small_button(eye).clicked() {
+                            if theme::button(ui, eye).clicked() {
                                 self.form.show_password = !self.form.show_password;
                             }
                         });
@@ -519,17 +513,22 @@ impl App {
                     });
                 });
 
-                theme::card(ui, Some("ULANISH VA SIFAT"), |ui| {
+                theme::card(ui, Some("ULANISH"), |ui| {
                     let tname = |t: Transport| match t {
                         Transport::Auto => "Avto",
                         Transport::Udp => "UDP",
                         Transport::Tcp => "TCP",
                     };
-                    ui.horizontal(|ui| {
+                    theme::form(ui, "transport", |ui| {
                         ui.label(theme::dim("Transport"));
-                        for t in [Transport::Auto, Transport::Udp, Transport::Tcp] {
-                            ui.selectable_value(&mut self.form.transport, t, tname(t));
-                        }
+                        ui.horizontal(|ui| {
+                            for t in [Transport::Auto, Transport::Udp, Transport::Tcp] {
+                                if theme::pill(ui, self.form.transport == t, tname(t)).clicked() {
+                                    self.form.transport = t;
+                                }
+                            }
+                        });
+                        ui.end_row();
                     });
                     theme::hint(
                         ui,
@@ -539,12 +538,11 @@ impl App {
                             Transport::Tcp => "UDP bloklangan tarmoqlar uchun; biroz sekinroq.",
                         },
                     );
-                    ui.add_space(8.0);
-                    quality_picker(ui, "p2p", &mut self.form.fps, &mut self.form.kbps, &mut self.form.height);
-                    ui.add_space(8.0);
-                    ui.checkbox(&mut self.form.input, "Sichqoncha va klaviatura bilan boshqarish");
-                    ui.checkbox(&mut self.form.save, "Ro'yxatga saqlash");
+                    ui.add_space(6.0);
+                    theme::toggle(ui, &mut self.form.input, "Sichqoncha va klaviatura bilan boshqarish");
+                    theme::toggle(ui, &mut self.form.save, "Ro'yxatga saqlash");
                 });
+                quality_card(ui, "p2p", &mut self.form.fps, &mut self.form.kbps, &mut self.form.height);
 
                 if let Some(e) = &self.error {
                     theme::error_banner(ui, e);
@@ -687,10 +685,10 @@ impl App {
                             want_disconnect = true;
                         }
                         let fs_text = if fullscreen { "Oynaga qaytish" } else { "To'liq ekran" };
-                        if ui.button(fs_text).clicked() {
+                        if theme::button(ui, fs_text).clicked() {
                             ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!fullscreen));
                         }
-                        if ui.selectable_label(self.input_on, "Boshqaruv").clicked() {
+                        if theme::pill(ui, self.input_on, "Boshqaruv").clicked() {
                             self.input_on = !self.input_on;
                         }
                     });

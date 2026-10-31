@@ -499,10 +499,8 @@ impl RelayPanel {
     pub fn ui(&mut self, ui: &mut Ui, quality: &mut dyn FnMut(&mut Ui)) -> Option<ConnectRequest> {
         let mut request = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.set_max_width(640.0);
-            ui.label(RichText::new("Server orqali").size(20.0).strong());
-            theme::hint(ui, "Boshqa kompyuterning 9 xonali ID sini kiriting. Ruxsat berilgach ulanasiz.");
-            ui.add_space(12.0);
+            ui.set_max_width(theme::PAGE_W);
+            theme::page_title(ui, "Server orqali", &["Boshqa kompyuterning 9 xonali ID sini kiriting. Ruxsat berilgach ulanasiz."]);
             quality(ui);
             request = self.card_connect(ui);
             self.card_contacts(ui);
@@ -514,11 +512,15 @@ impl RelayPanel {
     /// "HOST" bo'limi: bu kompyuter relay serveri bo'lishi.
     pub fn ui_server(&mut self, ui: &mut Ui) {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.set_max_width(640.0);
-            ui.label(RichText::new("HOST: server rejimi").size(20.0).strong());
-            theme::hint(ui, "Bu kompyuter boshqa kompyuterlarni bir-biriga ulab beruvchi server bo'ladi (\"Server orqali\" bo'limi uchun).");
-            theme::hint(ui, "Eslatma: \"Bu kompyuter\" bo'limi esa shu kompyuterning o'zini P2P uchun ochadi, bu boshqa narsa.");
-            ui.add_space(12.0);
+            ui.set_max_width(theme::PAGE_W);
+            theme::page_title(
+                ui,
+                "HOST: server rejimi",
+                &[
+                    "Bu kompyuter boshqa kompyuterlarni bir-biriga ulab beruvchi server bo'ladi (\"Server orqali\" bo'limi uchun).",
+                    "Eslatma: \"Bu kompyuter\" bo'limi esa shu kompyuterning o'zini P2P uchun ochadi, bu boshqa narsa.",
+                ],
+            );
             self.card_server(ui);
         });
     }
@@ -531,18 +533,17 @@ impl RelayPanel {
         let mut request = None;
         theme::card(ui, Some("ID BO'YICHA ULANISH"), |ui| {
             let mut enter = false;
-            egui::Grid::new("relay_conn").num_columns(2).spacing([14.0, 10.0]).min_col_width(70.0).show(ui, |ui| {
+            theme::form(ui, "relay_conn", |ui| {
                 ui.label(theme::dim("ID"));
                 let r = ui.add(
-                    egui::TextEdit::singleline(&mut self.target)
-                        .desired_width(200.0)
+                    theme::input(&mut self.target)
                         .hint_text("123 456 789")
                         .font(egui::TextStyle::Monospace),
                 );
                 enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                 ui.end_row();
                 ui.label(theme::dim("Parol"));
-                ui.add(egui::TextEdit::singleline(&mut self.password).password(true).desired_width(200.0).hint_text("qarovsiz parol (agar kerak bo'lsa)"));
+                ui.add(theme::input(&mut self.password).password(true).hint_text("qarovsiz parol (agar kerak bo'lsa)"));
                 ui.end_row();
             });
             theme::hint(ui, "Parol: o'sha kompyuterning qarovsiz paroli (ruxsat so'ramasdan ulanish uchun). Bo'sh qoldirsangiz, u kompyuterda ruxsat oynasi chiqadi.");
@@ -554,7 +555,7 @@ impl RelayPanel {
             let id = relay::normalize_id(&self.target);
             let can = relay::valid_id(&id) && self.online;
             if !self.online {
-                ui.label(RichText::new("Avval pastda serverga ulaning (\"Bu kompyuter\" kartasi).").color(theme::WARN));
+                theme::note(ui, "Avval pastda serverga ulaning (\"Bu kompyuter\" kartasi).", theme::WARN);
             }
             if theme::accent_button(ui, "Ulanish", egui::vec2(160.0, 34.0), can).clicked() || (enter && can) {
                 self.error = None;
@@ -580,7 +581,7 @@ impl RelayPanel {
                     }
                     ui.label(RichText::new(relay::pretty_id(&c.id)).monospace().size(12.0).color(theme::DIM));
                     ui.label(theme::dim(if on { "onlayn" } else { "oflayn" }));
-                    if ui.small_button("×").clicked() {
+                    if theme::button(ui, "×").clicked() {
                         delete = Some(i);
                     }
                 });
@@ -604,44 +605,45 @@ impl RelayPanel {
         let mut policy_changed = false;
         theme::card(ui, Some("BU KOMPYUTER (SERVERGA ULANISH)"), |ui| {
             let mut on = self.cfg.enabled;
-            if ui.checkbox(&mut on, "Serverga ulanib, ID orqali ulanishga ruxsat berish").changed() {
+            if theme::toggle(ui, &mut on, "Serverga ulanib, ID orqali ulanishga ruxsat berish").changed() {
                 toggle = Some(on);
             }
             ui.add_space(4.0);
-            egui::Grid::new("relay_cfg").num_columns(2).spacing([14.0, 8.0]).min_col_width(90.0).show(ui, |ui| {
+            theme::form(ui, "relay_cfg", |ui| {
                 ui.label(theme::dim("Server"));
-                ui.add(egui::TextEdit::singleline(&mut self.cfg.server).desired_width(260.0).hint_text("IP yoki nom (port 7780)"));
+                ui.add(theme::input(&mut self.cfg.server).hint_text("IP yoki nom (port 7780)"));
                 ui.end_row();
                 ui.label(theme::dim("Server kaliti"));
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.cfg.key).hint_text("ixtiyoriy").password(!self.show_key).desired_width(200.0));
-                    if ui.small_button(if self.show_key { "Yashirish" } else { "Ko'rsatish" }).clicked() {
+                    ui.add(theme::input(&mut self.cfg.key).hint_text("ixtiyoriy").password(!self.show_key));
+                    if theme::button(ui, if self.show_key { "Yashirish" } else { "Ko'rsatish" }).clicked() {
                         self.show_key = !self.show_key;
                     }
                 });
                 ui.end_row();
                 ui.label(theme::dim("Nom"));
-                ui.add(egui::TextEdit::singleline(&mut self.cfg.name).desired_width(260.0));
+                ui.add(theme::input(&mut self.cfg.name));
                 ui.end_row();
             });
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let (color, text) = if self.online {
-                    (theme::GOOD, "onlayn".to_string())
+            theme::form(ui, "relay_state", |ui| {
+                ui.label(theme::dim("Holat"));
+                if self.online {
+                    theme::chip(ui, "onlayn", theme::GOOD);
                 } else {
-                    (theme::DIM, self.status.clone())
-                };
-                theme::chip(ui, if self.online { "onlayn" } else { "oflayn" }, color);
-                if !self.online || !self.status.is_empty() {
-                    ui.label(theme::dim(&text));
+                    theme::chip(ui, "oflayn", theme::DIM);
                 }
+                ui.end_row();
             });
+            if !self.online && !self.status.is_empty() {
+                theme::hint(ui, &self.status);
+            }
             if !self.cfg.id.is_empty() {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    ui.label(theme::dim("Mening ID'm"));
+                    theme::row_label(ui, "Mening ID'm");
                     ui.label(RichText::new(relay::pretty_id(&self.cfg.id)).monospace().size(20.0).strong());
-                    if ui.small_button("Nusxalash").clicked() {
+                    if theme::button(ui, "Nusxalash").clicked() {
                         ui.ctx().output_mut(|o| o.copied_text = self.cfg.id.clone());
                     }
                 });
@@ -656,23 +658,17 @@ impl RelayPanel {
             }
             if self.cfg.unattended {
                 ui.horizontal(|ui| {
-                    ui.add_space(22.0);
+                    ui.add_space(26.0);
                     let hint = if ondemand::has_password() { "saqlangan (yangisini kiriting)" } else { "parol (kamida 8 belgi)" };
-                    ui.add(egui::TextEdit::singleline(&mut self.unattended_pw).password(true).desired_width(200.0).hint_text(hint));
-                    if ui.button("Saqlash").clicked() {
+                    ui.add(theme::input(&mut self.unattended_pw).password(true).hint_text(hint));
+                    if theme::button(ui, "Saqlash").clicked() {
                         save_pw = true;
                     }
                 });
                 match (&self.unattended_msg, ondemand::has_password()) {
-                    (Some((ok, m)), _) => {
-                        ui.colored_label(if *ok { theme::GOOD } else { theme::WARN }, m);
-                    }
-                    (None, true) => {
-                        ui.colored_label(theme::GOOD, "Parol saqlangan.");
-                    }
-                    (None, false) => {
-                        ui.colored_label(theme::WARN, "Parol o'rnatilmaguncha so'rovlar har safar ruxsat bilan qabul qilinadi.");
-                    }
+                    (Some((ok, m)), _) => theme::note(ui, m, if *ok { theme::GOOD } else { theme::WARN }),
+                    (None, true) => theme::note(ui, "Parol saqlangan.", theme::GOOD),
+                    (None, false) => theme::note(ui, "Parol o'rnatilmaguncha so'rovlar har safar ruxsat bilan qabul qilinadi.", theme::WARN),
                 }
                 theme::hint(
                     ui,
@@ -687,7 +683,7 @@ impl RelayPanel {
                 for (i, id) in self.trusted.iter().enumerate() {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(relay::pretty_id(id)).monospace());
-                        if ui.small_button("Olib tashlash").clicked() {
+                        if theme::button(ui, "Olib tashlash").clicked() {
                             untrust = Some(i);
                         }
                     });
@@ -739,14 +735,14 @@ impl RelayPanel {
         let mut open_fw = false;
         theme::card(ui, Some("SERVER REJIMI (BU KOMPYUTER SERVER BO'LADI)"), |ui| {
             let mut on = self.server_on;
-            if ui.checkbox(&mut on, "Server rejimini yoqish").changed() {
+            if theme::toggle(ui, &mut on, "Server rejimini yoqish").changed() {
                 toggle = Some(on);
             }
             theme::hint(ui, "Faqat oq (statik) IP li kompyuterda yoqing. Clientlar shu manzil bilan ulanadi.");
             ui.add_space(6.0);
             let running = self.server.is_some();
             let mut keyed = self.server_keyed;
-            if ui.add_enabled(!running, egui::Checkbox::new(&mut keyed, "Kalit bilan himoyalash")).changed() {
+            if ui.add_enabled_ui(!running, |ui| theme::toggle(ui, &mut keyed, "Kalit bilan himoyalash")).inner.changed() {
                 self.server_keyed = keyed;
                 self.save_server();
             }
@@ -754,18 +750,18 @@ impl RelayPanel {
                 theme::hint(ui, "Kalitsiz: server manzilini bilgan har kim ro'yxatdan o'tadi va server trafigidan foydalanadi. Ulanish baribir qabul qiluvchining ruxsati yoki parolini talab qiladi.");
             }
             ui.add_space(4.0);
-            egui::Grid::new("relay_srv").num_columns(2).spacing([14.0, 8.0]).min_col_width(90.0).show(ui, |ui| {
+            theme::form(ui, "relay_srv", |ui| {
                 ui.label(theme::dim("Port (UDP)"));
-                ui.add_enabled(!running, egui::TextEdit::singleline(&mut self.server_port).desired_width(80.0));
+                ui.add_enabled(!running, theme::input(&mut self.server_port).desired_width(80.0));
                 ui.end_row();
                 if self.server_keyed {
                     ui.label(theme::dim("Server kaliti"));
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&self.server_key).monospace());
-                        if ui.small_button("Nusxalash").clicked() {
+                        if theme::button(ui, "Nusxalash").clicked() {
                             ui.ctx().output_mut(|o| o.copied_text = self.server_key.clone());
                         }
-                        if ui.add_enabled(!running, egui::Button::new("Yangilash").small()).clicked() {
+                        if ui.add_enabled_ui(!running, |ui| theme::button(ui, "Yangilash")).inner.clicked() {
                             new_key = true;
                         }
                     });
@@ -780,12 +776,12 @@ impl RelayPanel {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     theme::chip(ui, "server ishlayapti", theme::GOOD);
-                    if ui.button("Firewall'da portni ochish").clicked() {
+                    if theme::button(ui, "Firewall'da portni ochish").clicked() {
                         open_fw = true;
                     }
                 });
                 if let Some((ok, t)) = &self.fw_msg {
-                    ui.label(RichText::new(t).color(if *ok { theme::GOOD } else { theme::BAD }));
+                    theme::note(ui, t, if *ok { theme::GOOD } else { theme::BAD });
                 }
                 ui.add_space(6.0);
                 ui.label(theme::dim("Ulangan clientlar"));

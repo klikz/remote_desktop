@@ -2,7 +2,8 @@
 //! "Ulanishga ruxsat berish" holati `host.enabled` fayli bilan eslab qolinadi:
 //! dastur qayta ochilganda Host avtomatik yoqiladi.
 
-use egui::{Color32, Ui};
+use super::theme;
+use egui::Ui;
 use host_windows::RunningHost;
 use rdcore::paths;
 use std::{os::windows::process::CommandExt, process::Command, time::Duration};
@@ -116,7 +117,7 @@ impl WinHost {
     pub fn ui(&mut self, ui: &mut Ui) {
         let mut on = self.host.is_some();
         let label = if on { "Ulanishga ruxsat berilgan" } else { "Ulanishga ruxsat berish" };
-        if ui.checkbox(&mut on, label).changed() {
+        if theme::toggle(ui, &mut on, label).changed() {
             if on {
                 self.start();
             } else {
@@ -124,23 +125,23 @@ impl WinHost {
             }
         }
         if let Some(e) = &self.error {
-            ui.colored_label(Color32::from_rgb(235, 110, 100), e);
+            theme::note(ui, e, theme::BAD);
         }
 
         let mut kick: Option<u64> = None;
         if let Some(h) = &self.host {
-            ui.colored_label(Color32::from_rgb(110, 200, 120), format!("Tinglamoqda: UDP va TCP {}", h.port));
+            theme::note(ui, &format!("Tinglamoqda: UDP va TCP {}", h.port), theme::GOOD);
             let peers = h.peers();
             ui.add_space(4.0);
             if peers.is_empty() {
-                ui.weak("Hozir hech kim ulanmagan.");
+                theme::hint(ui, "Hozir hech kim ulanmagan.");
             } else {
                 ui.label("Ulanganlar:");
                 for p in &peers {
                     ui.horizontal(|ui| {
                         ui.monospace(if p.via_tcp { format!("{} (TCP)", p.ip) } else { p.ip.to_string() });
                         ui.weak(fmt_dur(p.since.elapsed()));
-                        if ui.small_button("Uzish").clicked() {
+                        if theme::button(ui, "Uzish").clicked() {
                             kick = Some(p.id);
                         }
                     });
@@ -154,11 +155,11 @@ impl WinHost {
 
         ui.add_space(6.0);
         let mut auto = self.autostart;
-        if ui.checkbox(&mut auto, "Windows ishga tushganda dasturni avtomatik ochish").changed() {
+        if theme::toggle(ui, &mut auto, "Windows ishga tushganda dasturni avtomatik ochish").changed() {
             if set_autostart(auto) {
                 self.autostart = auto;
             }
         }
-        ui.weak("Dastur ochilganda, ruxsat yoqilgan bo'lsa, Host o'zi ishga tushadi.");
+        theme::hint(ui, "Dastur ochilganda, ruxsat yoqilgan bo'lsa, Host o'zi ishga tushadi.");
     }
 }
