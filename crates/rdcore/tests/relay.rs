@@ -93,7 +93,7 @@ async fn relay_end_to_end() {
     let server = RelayServer::bind(
         "127.0.0.1:0".parse().unwrap(),
         &HostIdentity::generate().unwrap(),
-        srv_creds,
+        Some(srv_creds),
         Some(dir.join("registry.txt")),
     )
     .unwrap();
@@ -187,6 +187,53 @@ async fn relay_end_to_end() {
     .await;
     let err = a.connect(&b_id).await.unwrap().unwrap_err();
     assert!(err.contains("oflayn"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Ochiq (kalitsiz) server: bo'sh kalit bilan ulanadi; kalitli server bo'sh kalitni rad etadi;
+/// yo'q ID ga ketma-ket urinishlar vaqtincha bloklanadi.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_server_and_key_policy() {
+    let dir = std::env::temp_dir().join(format!("rd-relay-open-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let start = |creds: Option<Credentials>, reg: &str| {
+        let server = RelayServer::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            &HostIdentity::generate().unwrap(),
+            creds,
+            Some(dir.join(reg)),
+        )
+        .unwrap();
+        let addr = format!("127.0.0.1:{}", server.local_addr().unwrap().port());
+        tokio::spawn(server.run());
+        addr
+    };
+
+    // Ochiq server: kalit bo'sh
+    let open = start(None, "open.txt");
+    let a = Agent::start(cfg(&open, "", "A", &dir, None), Policy::default());
+    let b = Agent::start(cfg(&open, "ixtiyoriy", "B", &dir, None), Policy::default());
+    let (_a_id, _b_id) = (registered(&a).await, registered(&b).await);
+
+    // Yo'q ID ga 10 marta urinish: keyin bloklanadi
+    for _ in 0..10 {
+        let err = a.connect("999999999").await.unwrap().unwrap_err();
+        assert!(err.contains("bunday ID yo'q"), "{err}");
+    }
+    let err = a.connect("999999999").await.unwrap().unwrap_err();
+    assert!(err.contains("juda ko'p"), "{err}");
+
+    // Kalitli server bo'sh kalitni rad etadi
+    let keyed = start(Some(Credentials::from_password(SERVER_KEY).unwrap()), "keyed.txt");
+    let c = Agent::start(cfg(&keyed, "", "C", &dir, None), Policy::default());
+    wait_event(&c, |e| match e {
+        AgentEvent::Status { text, .. } if text.contains("kalit talab qiladi") => Some(()),
+        _ => None,
+    })
+    .await;
 
     let _ = std::fs::remove_dir_all(&dir);
 }

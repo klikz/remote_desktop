@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex, MutexGuard,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::copy_bidirectional,
@@ -57,7 +57,12 @@ struct Sess {
 }
 
 struct St {
-    creds: Credentials,
+    /// `None`: ochiq server (kalitsiz ro'yxatdan o'tish mumkin).
+    creds: Option<Credentials>,
+    /// Yo'q ID ga urinishlar (ID ni taxmin qilishdan himoya), IP bo'yicha.
+    probes: RateLimiter,
+    /// Yangi ID olishlar: IP -> (soni, oyna boshlanishi).
+    new_ids: Mutex<HashMap<IpAddr, (u32, Instant)>>,
     fingerprint: [u8; 32],
     limiter: RateLimiter,
     reg: Mutex<Registry>,
@@ -123,7 +128,7 @@ impl RelayServer {
     pub fn bind(
         bind: SocketAddr,
         identity: &HostIdentity,
-        creds: Credentials,
+        creds: Option<Credentials>,
         registry_path: Option<PathBuf>,
     ) -> Result<Self> {
         let cfg = tls::server_config_alpn(identity, ALPN, MAX_BIDI)?;
@@ -132,6 +137,8 @@ impl RelayServer {
             endpoint,
             st: Arc::new(St {
                 creds,
+                probes: RateLimiter::new(10, Duration::from_secs(600), Duration::from_secs(900)),
+                new_ids: Mutex::new(HashMap::new()),
                 fingerprint: identity.fingerprint(),
                 limiter: RateLimiter::standard(),
                 reg: Mutex::new(Registry::load(registry_path)),
@@ -216,27 +223,46 @@ async fn client_task(incoming: quinn::Incoming, st: Arc<St>, ip: IpAddr) -> Resu
         bail!("birinchi xabar HELLO emas");
     };
 
-    let nonce = auth::random_bytes::<{ protocol::NONCE_LEN }>();
-    write_msg(&mut send, &RMsg::Challenge { salt: st.creds.salt, nonce }).await?;
-    let RMsg::Proof { proof } = timeout(STEP_TIMEOUT, read_msg(&mut recv))
-        .await
-        .context("PROOF kelmadi (vaqt tugadi)")??
-    else {
-        bail!("PROOF kutilgan edi");
-    };
-    if !auth::verify_proof(&st.creds.key, &nonce, &st.fingerprint, &proof) {
-        st.limiter.record_failure(ip);
-        let _ = write_msg(&mut send, &RMsg::Err { text: "server kaliti noto'g'ri".into() }).await;
-        finish_and_close(send, &conn).await;
-        bail!("server kaliti noto'g'ri");
+    // Kalitli server: parol isboti (fingerprint'ga bog'langan). Ochiq serverda bu bosqich yo'q.
+    if let Some(creds) = &st.creds {
+        let nonce = auth::random_bytes::<{ protocol::NONCE_LEN }>();
+        write_msg(&mut send, &RMsg::Challenge { salt: creds.salt, nonce }).await?;
+        let RMsg::Proof { proof } = timeout(STEP_TIMEOUT, read_msg(&mut recv))
+            .await
+            .context("PROOF kelmadi (vaqt tugadi)")??
+        else {
+            bail!("PROOF kutilgan edi");
+        };
+        if !auth::verify_proof(&creds.key, &nonce, &st.fingerprint, &proof) {
+            st.limiter.record_failure(ip);
+            let _ = write_msg(&mut send, &RMsg::Err { text: "server kaliti noto'g'ri".into() }).await;
+            finish_and_close(send, &conn).await;
+            bail!("server kaliti noto'g'ri");
+        }
+        st.limiter.record_success(ip);
     }
-    st.limiter.record_success(ip);
 
     let name = match clean(&name) {
         n if n.is_empty() => "Noma'lum".to_string(),
         n => n,
     };
     // Shaxsiyat: ID+token mos kelsa shu ID; ID yo'q yoki ro'yxatda topilmasa yangisi; token mos kelmasa rad.
+    let known = !id.is_empty() && lock(&st.reg).get(&id).is_some();
+    if !known {
+        // Yangi ID: ro'yxat hajmi va IP bo'yicha tezlik cheklanadi (ochiq serverni to'ldirib yuborishdan himoya)
+        let why = if lock(&st.reg).ids().len() >= MAX_IDS {
+            Some("serverda joy qolmadi (ro'yxat to'lgan)")
+        } else if !allow_new_id(&st, ip) {
+            Some("bu manzildan juda ko'p yangi ID so'raldi, keyinroq urinib ko'ring")
+        } else {
+            None
+        };
+        if let Some(text) = why {
+            let _ = write_msg(&mut send, &RMsg::Err { text: text.into() }).await;
+            finish_and_close(send, &conn).await;
+            bail!("{text}");
+        }
+    }
     let ident = {
         let mut reg = lock(&st.reg);
         if id.is_empty() {
@@ -323,6 +349,25 @@ async fn client_task(incoming: quinn::Incoming, st: Arc<St>, ip: IpAddr) -> Resu
     Ok(())
 }
 
+/// Bitta IP soatiga shuncha yangi ID ola oladi.
+const NEW_IDS_PER_HOUR: u32 = 10;
+/// Ro'yxatdagi ID'lar chegarasi.
+const MAX_IDS: usize = 2000;
+
+fn allow_new_id(st: &St, ip: IpAddr) -> bool {
+    let mut m = lock(&st.new_ids);
+    let now = Instant::now();
+    let e = m.entry(ip).or_insert((0, now));
+    if now.duration_since(e.1) >= Duration::from_secs(3600) {
+        *e = (0, now);
+    }
+    if e.0 >= NEW_IDS_PER_HOUR {
+        return false;
+    }
+    e.0 += 1;
+    true
+}
+
 async fn finish_and_close(mut send: quinn::SendStream, conn: &quinn::Connection) {
     let _ = send.finish();
     let _ = timeout(Duration::from_secs(2), send.stopped()).await;
@@ -355,7 +400,15 @@ fn handle(st: &Arc<St>, id: &str, m: RMsg) {
             if target == id {
                 return fail(st, id, &req, "o'zingizga ulanib bo'lmaydi");
             }
+            // ID ni taxmin qilib topishdan himoya: yo'q ID ga ketma-ket urinishlar vaqtincha bloklanadi
+            let ip = lock(&st.online).get(id).map(|o| o.ip);
+            if ip.is_some_and(|ip| st.probes.is_blocked(ip)) {
+                return fail(st, id, &req, "juda ko'p noto'g'ri ID kiritildi, keyinroq urinib ko'ring");
+            }
             if lock(&st.reg).get(&target).is_none() {
+                if let Some(ip) = ip {
+                    st.probes.record_failure(ip);
+                }
                 return fail(st, id, &req, "bunday ID yo'q");
             }
             let my_name = lock(&st.online).get(id).map(|o| o.name.clone()).unwrap_or_default();

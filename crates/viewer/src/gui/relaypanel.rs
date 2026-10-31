@@ -167,10 +167,11 @@ impl Drop for ServerRunner {
     }
 }
 
-fn start_server(port: u16, key: &str) -> Result<ServerRunner, String> {
+/// `key = None`: ochiq server (kalitsiz ro'yxatdan o'tish).
+fn start_server(port: u16, key: Option<&str>) -> Result<ServerRunner, String> {
     let (ready_tx, ready_rx) = mpsc::channel::<Result<ServerHandle, String>>();
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let key = key.to_string();
+    let key = key.map(str::to_string);
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
             Ok(rt) => rt,
@@ -183,7 +184,7 @@ fn start_server(port: u16, key: &str) -> Result<ServerRunner, String> {
             let setup = (|| -> anyhow::Result<RelayServer> {
                 let dir = paths::config_dir()?;
                 let identity = HostIdentity::load_or_create(&dir)?;
-                let creds = Credentials::from_password(&key)?;
+                let creds = key.as_deref().map(Credentials::from_password).transpose()?;
                 RelayServer::bind(SocketAddr::from(([0, 0, 0, 0], port)), &identity, creds, Some(dir.join("relay_registry.txt")))
             })();
             match setup {
@@ -242,6 +243,8 @@ pub struct RelayPanel {
     server_on: bool,
     server_port: String,
     server_key: String,
+    /// Kalit bilan himoyalash (standart yoqilgan).
+    server_keyed: bool,
     server: Option<ServerRunner>,
     server_error: Option<String>,
     fw_rx: Option<mpsc::Receiver<Result<String, String>>>,
@@ -269,6 +272,7 @@ impl RelayPanel {
             server_on: srv.get("enabled").is_some_and(|v| v == "1"),
             server_port: srv.get("port").cloned().unwrap_or_else(|| relay::DEFAULT_PORT.to_string()),
             server_key: if key.chars().count() >= 8 { key } else { random_key() },
+            server_keyed: srv.get("keyed").map_or(true, |v| v != "0"),
             server: None,
             server_error: None,
             fw_rx: None,
@@ -309,8 +313,8 @@ impl RelayPanel {
     fn start_agent(&mut self) {
         self.agent = None;
         self.online = false;
-        if self.cfg.server.trim().is_empty() || self.cfg.key.is_empty() {
-            self.status = "server manzili va kalitini kiriting".into();
+        if self.cfg.server.trim().is_empty() {
+            self.status = "server manzilini kiriting".into();
             return;
         }
         let Ok(known_hosts) = paths::known_hosts_file() else { return };
@@ -418,13 +422,13 @@ impl RelayPanel {
             return;
         }
         write_text("relay_server.pw", &self.server_key);
-        match start_server(port, &self.server_key) {
+        match start_server(port, self.server_keyed.then_some(self.server_key.as_str())) {
             Ok(s) => {
                 self.server = Some(s);
                 // Shu kompyuter ham clientmi: o'z serveriga ulanish sozlamalarini to'ldiramiz
                 if self.cfg.server.trim().is_empty() {
                     self.cfg.server = format!("127.0.0.1:{port}");
-                    self.cfg.key = self.server_key.clone();
+                    self.cfg.key = if self.server_keyed { self.server_key.clone() } else { String::new() };
                     self.cfg.save();
                 }
             }
@@ -437,7 +441,10 @@ impl RelayPanel {
     }
 
     fn save_server(&self) {
-        write_text("relay_server.txt", &format!("enabled={}\nport={}\n", self.server_on as u8, self.server_port.trim()));
+        write_text(
+            "relay_server.txt",
+            &format!("enabled={}\nport={}\nkeyed={}\n", self.server_on as u8, self.server_port.trim(), self.server_keyed as u8),
+        );
     }
 
     // --- UI -----------------------------------------------------------------------------------
@@ -461,9 +468,24 @@ impl RelayPanel {
             request = self.card_connect(ui);
             self.card_contacts(ui);
             self.card_this_pc(ui);
-            self.card_server(ui);
         });
         request
+    }
+
+    /// "HOST" bo'limi: bu kompyuter relay serveri bo'lishi.
+    pub fn ui_server(&mut self, ui: &mut Ui) {
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui.set_max_width(640.0);
+            ui.label(RichText::new("HOST: server rejimi").size(20.0).strong());
+            theme::hint(ui, "Bu kompyuter boshqa kompyuterlarni bir-biriga ulab beruvchi server bo'ladi (\"Server orqali\" bo'limi uchun).");
+            theme::hint(ui, "Eslatma: \"Bu kompyuter\" bo'limi esa shu kompyuterning o'zini P2P uchun ochadi, bu boshqa narsa.");
+            ui.add_space(12.0);
+            self.card_server(ui);
+        });
+    }
+
+    pub fn server_running(&self) -> bool {
+        self.server.is_some()
     }
 
     fn card_connect(&mut self, ui: &mut Ui) -> Option<ConnectRequest> {
@@ -552,7 +574,7 @@ impl RelayPanel {
                 ui.end_row();
                 ui.label(theme::dim("Server kaliti"));
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.cfg.key).password(!self.show_key).desired_width(200.0));
+                    ui.add(egui::TextEdit::singleline(&mut self.cfg.key).hint_text("ixtiyoriy").password(!self.show_key).desired_width(200.0));
                     if ui.small_button(if self.show_key { "Yashirish" } else { "Ko'rsatish" }).clicked() {
                         self.show_key = !self.show_key;
                     }
@@ -643,24 +665,35 @@ impl RelayPanel {
             if ui.checkbox(&mut on, "Server rejimini yoqish").changed() {
                 toggle = Some(on);
             }
-            theme::hint(ui, "Faqat oq (statik) IP li kompyuterda yoqing. Clientlar shu manzil va kalit bilan ulanadi.");
+            theme::hint(ui, "Faqat oq (statik) IP li kompyuterda yoqing. Clientlar shu manzil bilan ulanadi.");
             ui.add_space(6.0);
             let running = self.server.is_some();
+            let mut keyed = self.server_keyed;
+            if ui.add_enabled(!running, egui::Checkbox::new(&mut keyed, "Kalit bilan himoyalash")).changed() {
+                self.server_keyed = keyed;
+                self.save_server();
+            }
+            if !self.server_keyed {
+                theme::hint(ui, "Kalitsiz: server manzilini bilgan har kim ro'yxatdan o'tadi va server trafigidan foydalanadi. Ulanish baribir qabul qiluvchining ruxsati yoki parolini talab qiladi.");
+            }
+            ui.add_space(4.0);
             egui::Grid::new("relay_srv").num_columns(2).spacing([14.0, 8.0]).min_col_width(90.0).show(ui, |ui| {
                 ui.label(theme::dim("Port (UDP)"));
                 ui.add_enabled(!running, egui::TextEdit::singleline(&mut self.server_port).desired_width(80.0));
                 ui.end_row();
-                ui.label(theme::dim("Server kaliti"));
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&self.server_key).monospace());
-                    if ui.small_button("Nusxalash").clicked() {
-                        ui.ctx().output_mut(|o| o.copied_text = self.server_key.clone());
-                    }
-                    if ui.add_enabled(!running, egui::Button::new("Yangilash").small()).clicked() {
-                        new_key = true;
-                    }
-                });
-                ui.end_row();
+                if self.server_keyed {
+                    ui.label(theme::dim("Server kaliti"));
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&self.server_key).monospace());
+                        if ui.small_button("Nusxalash").clicked() {
+                            ui.ctx().output_mut(|o| o.copied_text = self.server_key.clone());
+                        }
+                        if ui.add_enabled(!running, egui::Button::new("Yangilash").small()).clicked() {
+                            new_key = true;
+                        }
+                    });
+                    ui.end_row();
+                }
             });
             if let Some(e) = &self.server_error {
                 ui.add_space(6.0);

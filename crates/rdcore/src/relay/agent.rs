@@ -228,14 +228,17 @@ async fn session(
 
     let (mut send, mut recv) = conn.open_bi().await.context("control oqimini ochib bo'lmadi")?;
     write_msg(&mut send, &RMsg::Hello { id: cfg.id.clone(), token: cfg.token.clone(), name: cfg.name.clone() }).await?;
-    let (salt, nonce) = match timeout(STEP_TIMEOUT, read_msg(&mut recv)).await.context("server javob bermadi")?? {
-        RMsg::Challenge { salt, nonce } => (salt, nonce),
-        RMsg::Err { text } => bail!("server rad etdi: {text}"),
-        other => bail!("kutilmagan xabar: {other:?}"),
-    };
-    let derived = auth::derive_key(&cfg.key, &salt)?;
-    write_msg(&mut send, &RMsg::Proof { proof: auth::compute_proof(&derived, &nonce, &fp_bytes) }).await?;
-    match timeout(STEP_TIMEOUT, read_msg(&mut recv)).await.context("server javob bermadi")?? {
+    // Javob: `Challenge` (kalitli server) yoki to'g'ridan-to'g'ri `Ok` (ochiq server, kalit kerak emas)
+    let mut first = timeout(STEP_TIMEOUT, read_msg(&mut recv)).await.context("server javob bermadi")??;
+    if let RMsg::Challenge { salt, nonce } = first {
+        if cfg.key.is_empty() {
+            bail!("bu server kalit talab qiladi: server kalitini kiriting");
+        }
+        let derived = auth::derive_key(&cfg.key, &salt)?;
+        write_msg(&mut send, &RMsg::Proof { proof: auth::compute_proof(&derived, &nonce, &fp_bytes) }).await?;
+        first = timeout(STEP_TIMEOUT, read_msg(&mut recv)).await.context("server javob bermadi")??;
+    }
+    match first {
         RMsg::Ok { id, token } => {
             if id != cfg.id || token != cfg.token {
                 cfg.id = id.clone();

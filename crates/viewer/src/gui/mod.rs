@@ -47,6 +47,7 @@ const HEIGHTS: [(u16, &str); 5] = [(720, "720p"), (1080, "1080p"), (1440, "1440p
 #[derive(PartialEq, Clone, Copy)]
 enum Tab {
     Connect,
+    Host,
     Relay,
     ThisPc,
 }
@@ -321,17 +322,23 @@ impl App {
                 theme::dot(ui, theme::ACCENT);
                 ui.label(RichText::new("Remote Desktop").size(16.0).strong());
                 ui.add_space(14.0);
-                if theme::tab(ui, self.tab == Tab::Connect, "Ulanish").clicked() {
+                if theme::tab(ui, self.tab == Tab::Connect, "P2P").clicked() {
                     self.tab = Tab::Connect;
                 }
                 if theme::tab(ui, self.tab == Tab::Relay, "Server orqali").clicked() {
                     self.tab = Tab::Relay;
+                }
+                if theme::tab(ui, self.tab == Tab::Host, "HOST").clicked() {
+                    self.tab = Tab::Host;
                 }
                 if theme::tab(ui, self.tab == Tab::ThisPc, "Bu kompyuter").clicked() {
                     self.tab = Tab::ThisPc;
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     theme::chip(ui, host_label, if host_on { theme::GOOD } else { theme::DIM });
+                    if self.relay.server_running() {
+                        theme::chip(ui, "Server: ishlayapti", theme::GOOD);
+                    }
                     if self.relay.is_online() {
                         theme::chip(ui, "Server: onlayn", theme::GOOD);
                     }
@@ -340,6 +347,10 @@ impl App {
         });
         if self.tab == Tab::ThisPc {
             egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| self.host.ui(ui));
+            return;
+        }
+        if self.tab == Tab::Host {
+            egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| self.relay.ui_server(ui));
             return;
         }
         if self.tab == Tab::Relay {

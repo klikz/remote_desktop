@@ -245,6 +245,7 @@ end-to-end qoladi (server trafikni o'qiy olmaydi): server faqat ikki clientning 
 - [x] UI: "Server orqali" bo'limi (ID bilan ulanish, kontaktlar onlayn/oflayn, o'z ID, rejim, server rejimi, ulangan clientlar, firewall tugmasi)
 - [x] Firewall: Windows (UAC + netsh), Ubuntu (pkexec + ufw faol bo'lsa) (`gui/firewall.rs`)
 - [x] Test: `rdcore/tests/relay.rs` (ikki client, dialog qabul/rad, bir martalik parol, qarovsiz, yo'q/oflayn ID, noto'g'ri server kaliti)
+- [x] UI: "Ulanish" -> "P2P", server rejimi alohida "HOST" bo'limida; server kaliti ixtiyoriy (server egasi "Kalit bilan himoyalash" ni o'chira oladi; ochiq serverda IP bo'yicha yangi ID cheklovi va noto'g'ri ID urinishlari bloki)
 - [ ] Sinov: haqiqiy ikki kompyuter (Windows server + Ubuntu client), mobil tarmoq (simmetrik NAT), UI qo'lda
 - [ ] Relay serveriga TCP zaxira (UDP bloklangan tarmoqlar uchun clientdan serverga)
 - [ ] Ishlash o'lchovi: ichki QUIC tashqi oqim ustida (kechikish/yo'qotish); yomon bo'lsa QUIC datagram'ga o'tish
@@ -313,3 +314,4 @@ serverga hech qachon yuborilmaydi). Host fingerprint'i `id:<ID>` kaliti bilan bi
 | 2026-10-30 | Linux "Ulanishga ruxsat": yoqilganda to'liq tekshiruv (Host qayta o'rnatiladi, reset-failed, restart, 3 s dan keyin holat tekshiriladi, yiqilsa log UI'da); avtomatik kirish standart yoqilgan va holati/“Yoqish” tugmasi doim ko'rinadi |
 | 2026-10-30 | Reja: 9.4 ga 24.04 dagi "Host faqat skript bilan ishga tushdi" muammosi, 9.8 qulflangan ekranda ishlash tadqiqoti qo'shildi |
 | 2026-10-30 | Bosqich 10: server (relay) rejimi: `rdcore::relay` (server, agent, registry), bir martalik parol, UI "Server orqali", firewall; rdcore testlari o'tdi, haqiqiy qurilmalarda sinov kutilmoqda |
+| 2026-10-31 | UI: "Ulanish" -> "P2P", server rejimi "HOST" bo'limiga ko'chdi; server kaliti ixtiyoriy (ochiq server himoyasi: IP bo'yicha yangi ID cheklovi, noto'g'ri ID urinishlari bloki); rdcore testlari o'tdi |
