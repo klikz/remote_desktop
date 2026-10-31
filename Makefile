@@ -4,6 +4,8 @@
 #   make build    faqat build (pull qilmasdan)
 #   make run      build, o'rnatilgan Host xizmatini yangilash (kerak bo'lsa) va Viewer ni ishga tushirish
 #   make push     hamma o'zgarishni commit (xabar ".") va push qilish; xabar: make push MSG="matn"
+#   make buildWin Windows uchun build (release)
+#   make runWin   Windows: build + ishga tushirish (target/release/viewer.exe)
 #   make clean    build fayllarini o'chirish
 #   NO_HOST=1 make   GStreamer dev paketlarisiz (faqat Viewer)
 
@@ -14,7 +16,7 @@ export PATH := $(HOME)/.cargo/bin:$(PATH)
 
 MSG ?= .
 
-.PHONY: all update toolchain build install-host run push clean
+.PHONY: all update toolchain build install-host run push clean buildWin runWin
 
 all: update build run
 
@@ -48,3 +50,12 @@ push:
 
 clean:
 	cargo clean
+
+# --- Windows (Git Bash / make bilan) -------------------------------------------------------------
+WIN_VIEWER := target/release/viewer.exe
+
+buildWin:
+	cargo build --release -p viewer
+
+runWin: buildWin
+	$(WIN_VIEWER)
