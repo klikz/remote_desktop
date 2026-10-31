@@ -8,3 +8,6 @@ app/src/main/jniLibs/
 *.iml
 .idea/
 .kotlin/
+keystore.properties
+*.jks
+*.keystore

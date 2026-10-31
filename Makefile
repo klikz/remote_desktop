@@ -5,9 +5,12 @@
 #   make run      build, o'rnatilgan Host xizmatini yangilash (kerak bo'lsa) va Viewer ni ishga tushirish
 #   make push     hamma o'zgarishni commit (xabar ".") va push qilish; xabar: make push MSG="matn"
 #   make buildWin Windows uchun build (release)
+#   Tayyor fayllar hammasi builds/ papkasiga tushadi (PC va Android)
 #   make runWin   Windows: cargo run -p viewer (debug, terminalda loglar ko'rinadi)
 #   make mobileBuild  Android APK yig'ish (mobile_viewer/app/build/outputs/apk/debug/app-debug.apk)
 #   make mobileRun    APK yig'ish, telefon/emulyatorga o'rnatish va ishga tushirish
+#   make mobileKeystore  Android release imzo kalitini yaratish (bir marta)
+#   make mobileRelease   imzolangan release APK va AAB
 #   make clean    build fayllarini o'chirish
 #   NO_HOST=1 make   GStreamer dev paketlarisiz (faqat Viewer)
 
@@ -25,7 +28,7 @@ else
 MOBILE_BASH ?= bash
 endif
 
-.PHONY: all update toolchain build install-host run push clean buildWin runWin mobileBuild mobileRun
+.PHONY: all update toolchain build install-host run push clean buildWin runWin mobileBuild mobileRun mobileKeystore mobileRelease
 
 all: update build run
 
@@ -37,6 +40,8 @@ toolchain:
 
 build: toolchain
 	bash scripts/build-viewer.sh
+	@mkdir -p builds && cp -f $(VIEWER) builds/msremote-viewer-linux
+	@echo "Tayyor: builds/msremote-viewer-linux"
 
 HOST_BIN := $(HOME)/.local/bin/remote-desktop-host
 
@@ -64,6 +69,7 @@ clean:
 
 buildWin:
 	cargo build --release -p viewer
+	@$(MOBILE_BASH) -c "mkdir -p builds && cp -f target/release/viewer.exe builds/msremote-viewer.exe && echo Tayyor: builds/msremote-viewer.exe"
 
 runWin:
 	cargo run -p viewer
@@ -75,3 +81,9 @@ mobileBuild:
 
 mobileRun:
 	$(MOBILE_BASH) scripts/mobile.sh run
+
+mobileKeystore:
+	$(MOBILE_BASH) scripts/mobile.sh keystore
+
+mobileRelease:
+	$(MOBILE_BASH) scripts/mobile.sh release

@@ -2,3 +2,4 @@
 *.pdb
 .idea/
 .vscode/
+/builds

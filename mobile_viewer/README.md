@@ -50,6 +50,31 @@ gradle wrapper        # bir marta (gradle-wrapper.jar repoda yo'q)
 
 APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
+## Release (imzolangan) build
+
+1. Imzo kalitini bir marta yarating (parol so'raladi):
+
+```bash
+make mobileKeystore
+```
+
+Natija: `mobile_viewer/release.jks` va `mobile_viewer/keystore.properties` (ikkalasi ham `.gitignore` da).
+**Ularni va parolni xavfsiz joyda zaxiralang**: kalitsiz ilovaning keyingi versiyasini imzolab bo'lmaydi
+(Play'dagi ilova yangilanmaydi, telefonda esa avval eski ilovani o'chirishga to'g'ri keladi).
+
+2. Imzolangan build:
+
+```bash
+make mobileRelease
+```
+
+- APK (telefonga to'g'ridan-to'g'ri o'rnatish): `app/build/outputs/apk/release/app-release.apk`
+- AAB (Google Play'ga yuklash): `app/build/outputs/bundle/release/app-release.aab`
+
+CI yoki boshqa kompyuterda `keystore.properties` o'rniga muhit o'zgaruvchilari ishlatiladi:
+`RD_KEYSTORE` (jks yo'li), `RD_KEYSTORE_PASSWORD`, `RD_KEY_ALIAS`, `RD_KEY_PASSWORD`.
+Yangi versiya chiqarishdan oldin `app/build.gradle.kts` dagi `versionCode` ni oshiring.
+
 ## Ishlatish
 
 1. **Server sozlamalari**: relay server manzili (`host` yoki `host:port`, standart port 7780), server kaliti va qurilma nomi → "Saqlash va qayta ulanish". Tepada "Onlayn" va o'z ID ko'rinadi.
