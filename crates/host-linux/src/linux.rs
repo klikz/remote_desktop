@@ -60,18 +60,20 @@ async fn run_host(args: &[String]) -> Result<()> {
     let mut ip: IpAddr = "0.0.0.0".parse()?;
     // Ustuvorlik: --port > UI'da saqlangan port (`port` fayli) > standart 7777
     let mut port: u16 = paths::read_host_port().unwrap_or(DEFAULT_PORT);
+    let mut pw_file: Option<std::path::PathBuf> = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--bind" => ip = it.next().context("--bind uchun qiymat kerak")?.parse().context("noto'g'ri IP")?,
             "--port" => port = it.next().context("--port uchun qiymat kerak")?.parse().context("noto'g'ri port")?,
+            "--password-file" => pw_file = Some(it.next().context("--password-file uchun yo'l kerak")?.into()),
             other => bail!("noma'lum argument: {other}\n\n{USAGE}"),
         }
     }
 
     let dir = paths::config_dir()?;
     let identity = HostIdentity::load_or_create(&dir)?;
-    let creds = Credentials::load(&paths::host_password_file()?)
+    let creds = Credentials::load(&pw_file.map_or_else(paths::host_password_file, Ok)?)
         .context("parol o'rnatilmagan. Avval `host-linux set-password` ni ishga tushiring")?;
     let caps = Capabilities {
         codecs: CODEC_H264,

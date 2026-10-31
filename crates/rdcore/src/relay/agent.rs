@@ -46,6 +46,9 @@ pub struct AgentConfig {
     pub host_port: Option<u16>,
 }
 
+/// Talab bo'yicha Host ishga tushiruvchi (bloklovchi; `spawn_blocking` ichida chaqiriladi).
+pub type EnsureHost = Arc<dyn Fn() -> Result<u16> + Send + Sync>;
+
 /// Kiruvchi so'rovlarga munosabat (UI o'zgartirib turadi).
 #[derive(Default)]
 pub struct Policy {
@@ -53,6 +56,8 @@ pub struct Policy {
     pub unattended: bool,
     /// Ishonchli ID'lar: dialogsiz, bir martalik parol bilan qabul qilinadi.
     pub trusted: HashSet<String>,
+    /// Qarovsiz qabulda chaqiriladi: parol bilan alohida Host'ni (kerak bo'lsa) ishga tushirib, uning portini qaytaradi.
+    pub ensure_host: Option<EnsureHost>,
 }
 
 #[derive(Debug)]
@@ -274,12 +279,12 @@ async fn session(
                         let _ = ev.send(AgentEvent::Presence { id, online, name });
                     }
                     RMsg::Incoming { sid, from, name } => {
-                        let (auto, unattended) = {
+                        let (auto, unattended, ensure) = {
                             let p = policy.lock().unwrap_or_else(|e| e.into_inner());
-                            (p.unattended || p.trusted.contains(&from), p.unattended)
+                            (p.unattended || p.trusted.contains(&from), p.unattended, p.ensure_host.clone())
                         };
                         if auto {
-                            accept(&conn, &mut send, &sid, &from, !unattended, cfg.host_port).await?;
+                            accept(&conn, &mut send, &sid, &from, !unattended, cfg.host_port, if unattended { ensure } else { None }).await?;
                         } else {
                             pending_in.insert(sid.clone(), from.clone());
                             let _ = ev.send(AgentEvent::Incoming { sid, from, name });
@@ -309,7 +314,7 @@ async fn session(
                 Some(Cmd::Reply { sid, accept: yes }) => {
                     if let Some(from) = pending_in.remove(&sid) {
                         if yes {
-                            accept(&conn, &mut send, &sid, &from, true, cfg.host_port).await?;
+                            accept(&conn, &mut send, &sid, &from, true, cfg.host_port, None).await?;
                         } else {
                             write_msg(&mut send, &RMsg::Reply { sid, accept: false, pw: None }).await?;
                         }
@@ -339,8 +344,21 @@ async fn accept(
     sid: &str,
     from: &str,
     one_time: bool,
-    host_port: Option<u16>,
+    mut host_port: Option<u16>,
+    ensure: Option<EnsureHost>,
 ) -> Result<()> {
+    if let Some(ensure) = ensure {
+        // Qarovsiz: alohida parolli Host kerak bo'lsa shu yerda ishga tushadi
+        match tokio::task::spawn_blocking(move || ensure()).await {
+            Ok(Ok(port)) => host_port = Some(port),
+            other => {
+                let e = match other { Ok(Err(e)) => format!("{e:#}"), Err(e) => e.to_string(), Ok(Ok(_)) => String::new() };
+                eprintln!("[agent] qarovsiz Host ishga tushmadi: {e}");
+                write_msg(send, &RMsg::Reply { sid: sid.to_string(), accept: false, pw: None }).await?;
+                return Ok(());
+            }
+        }
+    }
     let pw = if one_time {
         let made = Credentials::load(&paths::host_password_file()?)
             .context("Host paroli o'rnatilmagan")

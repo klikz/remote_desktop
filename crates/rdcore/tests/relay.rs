@@ -173,6 +173,31 @@ async fn relay_end_to_end() {
     assert!(relayed.pw.is_none());
     ping_through(relayed, &b_id, HOST_PW, &dir).await;
 
+    // 3b) Qarovsiz rejim, alohida parol va talab bo'yicha Host (Host paroli va porti ishlatilmaydi)
+    const UNATT_PW: &str = "unattended-pw-456";
+    let rt = tokio::runtime::Handle::current();
+    let ensure: rdcore::relay::agent::EnsureHost = std::sync::Arc::new(move || {
+        let _guard = rt.enter();
+        let creds = Credentials::from_password(UNATT_PW)?;
+        let h = Host::bind("127.0.0.1:0".parse().unwrap(), &HostIdentity::generate()?, creds, caps())?;
+        let port = h.local_addr()?.port();
+        tokio::spawn(h.run());
+        Ok(port)
+    });
+    let _ = std::fs::remove_file(dir.join("kh-viewer")); // yangi Host: boshqa sertifikat
+    b.policy.lock().unwrap().ensure_host = Some(ensure);
+    let relayed = timeout(Duration::from_secs(8), a.connect(&b_id)).await.unwrap().unwrap().expect("qarovsiz qabul");
+    ping_through(relayed, &b_id, UNATT_PW, &dir).await;
+    let relayed = timeout(Duration::from_secs(8), a.connect(&b_id)).await.unwrap().unwrap().expect("qarovsiz qabul");
+    let kh = KnownHosts::new(dir.join("kh-viewer"));
+    let wrong = connect_relayed(
+        ConnectOptions { addr: relayed.local, password: HOST_PW, known_hosts: &kh, confirm_new_host: &|_| true },
+        format!("id:{b_id}"),
+    )
+    .await;
+    assert!(wrong.is_err(), "Host paroli qarovsiz Host'da ishlamasligi kerak");
+    b.policy.lock().unwrap().ensure_host = None;
+
     // 4) Yo'q ID va oflayn
     let err = a.connect("999999999").await.unwrap().unwrap_err();
     assert!(err.contains("bunday ID yo'q"), "{err}");

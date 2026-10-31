@@ -17,3 +17,4 @@ egui = "0.29"
 
 [target.'cfg(windows)'.dependencies]
 host-windows = { path = "../host-windows" }
+tray-icon = { version = "0.19", default-features = false }

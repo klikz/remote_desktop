@@ -8,11 +8,14 @@ mod winhost;
 mod hosts;
 mod input;
 mod keys;
+mod ondemand;
 #[cfg(target_os = "linux")]
 mod linuxhost;
 mod relaypanel;
 mod session;
 mod theme;
+#[cfg(windows)]
+mod tray;
 
 use egui::{Align, Align2, Color32, Key, Layout, RichText, Sense, TextureHandle, TextureOptions, ViewportCommand};
 use hosts::SavedHost;
@@ -100,6 +103,11 @@ struct App {
     tex: Option<TextureHandle>,
     fwd: input::Forwarder,
     stats: Stats,
+    #[cfg(windows)]
+    tray: Option<tray::Tray>,
+    /// Oyna trayga yashirilgan.
+    hidden: bool,
+    quitting: bool,
 }
 
 impl App {
@@ -136,6 +144,10 @@ impl App {
             tex: None,
             fwd: input::Forwarder::default(),
             stats: Stats { last: Instant::now(), frames: 0, bytes: 0, fps: 0.0, kbps: 0.0 },
+            #[cfg(windows)]
+            tray: tray::Tray::new(&cc.egui_ctx),
+            hidden: false,
+            quitting: false,
         };
         if !app.hosts.is_empty() {
             app.select(0);
@@ -722,8 +734,49 @@ impl App {
     }
 }
 
+impl App {
+    /// Tray: oyna yopilsa/pastga tushirilsa (agent yoqilgan bo'lsa) yashirinadi; ikonka orqali qaytadi.
+    #[cfg(windows)]
+    fn tray_update(&mut self, ctx: &egui::Context) {
+        let Some(tray) = self.tray.as_mut() else { return };
+        tray.set_status(&self.relay.status_line());
+        let mut show = false;
+        for c in tray.poll() {
+            match c {
+                tray::Cmd::Show => show = true,
+                tray::Cmd::Quit => {
+                    self.quitting = true;
+                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
+            }
+        }
+        // Ruxsat so'rovi kelsa yashirin oynani ochamiz (30 soniyada javob berish uchun)
+        if self.hidden && self.relay.has_incoming() {
+            show = true;
+        }
+        if show {
+            self.hidden = false;
+            ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(ViewportCommand::Focus);
+        }
+        let (close, minimized) = ctx.input(|i| (i.viewport().close_requested(), i.viewport().minimized == Some(true)));
+        if !self.quitting && !self.hidden && self.relay.agent_active() && (close || minimized) {
+            if close {
+                ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+            }
+            self.hidden = true;
+            ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn tray_update(&mut self, _ctx: &egui::Context) {}
+}
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.tray_update(ctx);
         self.poll_session(ctx);
         self.relay.poll(ctx);
         match self.screen {

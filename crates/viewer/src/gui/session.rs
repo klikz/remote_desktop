@@ -151,7 +151,7 @@ async fn run(
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             let password = relayed.pw.clone().unwrap_or_else(|| p.password.clone());
             if password.is_empty() {
-                anyhow::bail!("bu kompyuter qarovsiz rejimda: Host parolini kiriting");
+                anyhow::bail!("bu kompyuter qarovsiz rejimda: qarovsiz parolni kiriting");
             }
             connect_relayed(
                 ConnectOptions { addr: relayed.local, password: &password, known_hosts: &known_hosts, confirm_new_host: &confirm },

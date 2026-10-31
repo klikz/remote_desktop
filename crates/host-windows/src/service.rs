@@ -80,7 +80,7 @@ async fn run_host(args: &[String]) -> Result<()> {
             other => bail!("noma'lum argument: {other}\n\n{USAGE}"),
         }
     }
-    let host = bind_host(ip, port)?;
+    let host = bind_host(ip, port, None)?;
     let _tcp = host.spawn_tcp_tunnel();
     println!("Host ishga tushdi: {} (UDP)", host.local_addr()?);
     println!("Fingerprint: {}", hexfmt::colon(&host.fingerprint()));
@@ -89,11 +89,14 @@ async fn run_host(args: &[String]) -> Result<()> {
 }
 
 /// Sertifikat va parolni o'qib, UDP portni ochadi. Tokio runtime ichida chaqirilishi kerak.
-fn bind_host(ip: IpAddr, port: u16) -> Result<Host> {
+fn bind_host(ip: IpAddr, port: u16, creds: Option<Credentials>) -> Result<Host> {
     let dir = paths::config_dir()?;
     let identity = HostIdentity::load_or_create(&dir)?;
-    let creds = Credentials::load(&paths::host_password_file()?)
-        .context("parol o'rnatilmagan: \"Bu kompyuter\" bo'limida yoki `host-windows set-password` bilan o'rnating")?;
+    let creds = match creds {
+        Some(c) => c,
+        None => Credentials::load(&paths::host_password_file()?)
+            .context("parol o'rnatilmagan: \"Bu kompyuter\" bo'limida yoki `host-windows set-password` bilan o'rnating")?,
+    };
     let caps = Capabilities { codecs: CODEC_H264, max_fps: 60, monitors: vec![] };
     Host::bind(SocketAddr::new(ip, port), &identity, creds, caps)
 }
@@ -137,8 +140,17 @@ pub struct RunningHost {
 
 impl RunningHost {
     pub fn start(port: u16) -> Result<RunningHost> {
+        Self::start_with("0.0.0.0".parse().unwrap(), port, None)
+    }
+
+    /// Qarovsiz (ID orqali) ulanish uchun: faqat loopback'da, bo'sh portda, alohida parol bilan.
+    pub fn start_dedicated(creds: Credentials) -> Result<RunningHost> {
+        Self::start_with("127.0.0.1".parse().unwrap(), 0, Some(creds))
+    }
+
+    fn start_with(ip: IpAddr, port: u16, creds: Option<Credentials>) -> Result<RunningHost> {
         dpi_aware();
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<std::result::Result<String, String>>();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<std::result::Result<(String, u16), String>>();
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
         let shared = Arc::new(Shared::default());
         let sh = shared.clone();
@@ -151,7 +163,7 @@ impl RunningHost {
                 }
             };
             rt.block_on(async {
-                let host = match bind_host("0.0.0.0".parse().unwrap(), port) {
+                let host = match bind_host(ip, port, creds) {
                     Ok(h) => h,
                     Err(e) => {
                         let _ = ready_tx.send(Err(format!("{e:#}")));
@@ -159,7 +171,8 @@ impl RunningHost {
                     }
                 };
                 let _tcp = host.spawn_tcp_tunnel();
-                let _ = ready_tx.send(Ok(hexfmt::colon(&host.fingerprint())));
+                let bound = host.local_addr().map(|a| a.port()).unwrap_or(port);
+                let _ = ready_tx.send(Ok((hexfmt::colon(&host.fingerprint()), bound)));
                 tokio::select! {
                     r = host.run_with(make_handler(sh.clone())) => {
                         if let Err(e) = r {
@@ -177,7 +190,7 @@ impl RunningHost {
             rt.shutdown_timeout(Duration::from_secs(2));
         });
         match ready_rx.recv_timeout(Duration::from_secs(10)) {
-            Ok(Ok(fingerprint)) => Ok(RunningHost { port, fingerprint, shared, stop_tx: Some(stop_tx), thread: Some(thread) }),
+            Ok(Ok((fingerprint, port))) => Ok(RunningHost { port, fingerprint, shared, stop_tx: Some(stop_tx), thread: Some(thread) }),
             Ok(Err(e)) => {
                 let _ = thread.join();
                 Err(anyhow!(e))

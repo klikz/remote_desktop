@@ -2,7 +2,7 @@
 //! (ID, qabul qilish rejimi, ishonchli ro'yxat), server rejimi (ulangan clientlar, firewall) va kiruvchi
 //! so'rov dialogi. Hammasi `rdcore::relay` ustida.
 
-use super::{firewall, theme};
+use super::{ondemand, firewall, theme};
 use egui::{Align2, Key, RichText, Ui};
 use rdcore::{
     auth::Credentials,
@@ -239,6 +239,10 @@ pub struct RelayPanel {
     password: String,
     error: Option<String>,
     show_key: bool,
+    /// Qarovsiz parol maydoni (saqlangach tozalanadi) va uning holati.
+    unattended_pw: String,
+    unattended_msg: Option<(bool, String)>,
+    ondemand: ondemand::Guard,
     // server rejimi
     server_on: bool,
     server_port: String,
@@ -269,6 +273,9 @@ impl RelayPanel {
             password: String::new(),
             error: None,
             show_key: false,
+            unattended_pw: String::new(),
+            unattended_msg: None,
+            ondemand: ondemand::Guard::default(),
             server_on: srv.get("enabled").is_some_and(|v| v == "1"),
             server_port: srv.get("port").cloned().unwrap_or_else(|| relay::DEFAULT_PORT.to_string()),
             server_key: if key.chars().count() >= 8 { key } else { random_key() },
@@ -295,6 +302,26 @@ impl RelayPanel {
 
     pub fn is_online(&self) -> bool {
         self.online
+    }
+
+    /// Agent yoqilgan (tray'ga yashirinish shu holatda mantiqli).
+    pub fn agent_active(&self) -> bool {
+        self.agent.is_some()
+    }
+
+    pub fn has_incoming(&self) -> bool {
+        !self.incoming.is_empty()
+    }
+
+    /// Tray uchun qisqa holat.
+    pub fn status_line(&self) -> String {
+        if self.online && !self.cfg.id.is_empty() {
+            format!("Onlayn · ID {}", relay::pretty_id(&self.cfg.id))
+        } else if self.agent.is_some() {
+            format!("Ulanilmoqda: {}", self.status)
+        } else {
+            "Oflayn".to_string()
+        }
     }
 
     /// Muvaffaqiyatli ulanishdan keyin ID kontaktlarga saqlanadi.
@@ -327,7 +354,11 @@ impl RelayPanel {
             known_hosts,
             host_port: None,
         };
-        let policy = Policy { unattended: self.cfg.unattended, trusted: self.trusted.iter().cloned().collect::<HashSet<_>>() };
+        let policy = Policy {
+            unattended: self.cfg.unattended && ondemand::has_password(),
+            trusted: self.trusted.iter().cloned().collect::<HashSet<_>>(),
+            ensure_host: Some(self.ondemand.ensure_fn()),
+        };
         self.agent = Some(Agent::start(cfg, policy));
         self.status = "ulanilmoqda...".into();
         self.subscribe();
@@ -335,6 +366,7 @@ impl RelayPanel {
 
     fn stop_agent(&mut self) {
         self.agent = None;
+        self.ondemand.stop();
         self.online = false;
         self.status = "o'chirilgan".into();
         self.presence.clear();
@@ -350,7 +382,7 @@ impl RelayPanel {
     fn sync_policy(&self) {
         if let Some(a) = &self.agent {
             let mut p = a.policy.lock().unwrap_or_else(|e| e.into_inner());
-            p.unattended = self.cfg.unattended;
+            p.unattended = self.cfg.unattended && ondemand::has_password();
             p.trusted = self.trusted.iter().cloned().collect();
         }
     }
@@ -503,10 +535,10 @@ impl RelayPanel {
                 enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                 ui.end_row();
                 ui.label(theme::dim("Parol"));
-                ui.add(egui::TextEdit::singleline(&mut self.password).password(true).desired_width(200.0).hint_text("faqat qarovsiz rejim uchun"));
+                ui.add(egui::TextEdit::singleline(&mut self.password).password(true).desired_width(200.0).hint_text("qarovsiz parol (agar kerak bo'lsa)"));
                 ui.end_row();
             });
-            theme::hint(ui, "Parol: agar u kompyuter ruxsat so'ramasdan (qarovsiz) qabul qilsa, Host parolini kiriting.");
+            theme::hint(ui, "Parol: agar u kompyuter ruxsat so'ramasdan (qarovsiz) qabul qilsa, o'sha kompyuterda belgilangan qarovsiz parolni kiriting.");
             ui.add_space(6.0);
             if let Some(e) = &self.error {
                 theme::error_banner(ui, e);
@@ -561,6 +593,7 @@ impl RelayPanel {
         let mut apply = false;
         let mut toggle: Option<bool> = None;
         let mut untrust: Option<usize> = None;
+        let mut save_pw = false;
         let mut policy_changed = false;
         theme::card(ui, Some("BU KOMPYUTER (SERVERGA ULANISH)"), |ui| {
             let mut on = self.cfg.enabled;
@@ -611,10 +644,36 @@ impl RelayPanel {
             if ui.radio_value(&mut self.cfg.unattended, false, "Har safar ruxsat so'rash (30 soniyadan keyin rad etiladi)").changed() {
                 policy_changed = true;
             }
-            if ui.radio_value(&mut self.cfg.unattended, true, "Qarovsiz: ruxsat so'ramasdan, Host paroli bilan").changed() {
+            if ui.radio_value(&mut self.cfg.unattended, true, "Qarovsiz: ruxsat so'ramasdan, alohida parol bilan").changed() {
                 policy_changed = true;
             }
-            theme::hint(ui, "Ulanishlarni qabul qilish uchun \"Bu kompyuter\" bo'limida Host yoqilgan va parol o'rnatilgan bo'lishi kerak.");
+            if self.cfg.unattended {
+                ui.horizontal(|ui| {
+                    ui.add_space(22.0);
+                    let hint = if ondemand::has_password() { "saqlangan (yangisini kiriting)" } else { "parol (kamida 8 belgi)" };
+                    ui.add(egui::TextEdit::singleline(&mut self.unattended_pw).password(true).desired_width(200.0).hint_text(hint));
+                    if ui.button("Saqlash").clicked() {
+                        save_pw = true;
+                    }
+                });
+                match (&self.unattended_msg, ondemand::has_password()) {
+                    (Some((ok, m)), _) => {
+                        ui.colored_label(if *ok { theme::GOOD } else { theme::WARN }, m);
+                    }
+                    (None, true) => {
+                        ui.colored_label(theme::GOOD, "Parol saqlangan.");
+                    }
+                    (None, false) => {
+                        ui.colored_label(theme::WARN, "Parol o'rnatilmaguncha so'rovlar har safar ruxsat bilan qabul qilinadi.");
+                    }
+                }
+                theme::hint(
+                    ui,
+                    "Bu parol faqat ID orqali qarovsiz ulanish uchun. Host paroli va \"Ulanishga ruxsat berish\" dan mustaqil: kompyuter serverga ulangan bo'lsa yetarli.",
+                );
+            } else {
+                theme::hint(ui, "Har bir ulanishga bir martalik parol beriladi; Host kerak bo'lsa o'zi ishga tushadi.");
+            }
             if !self.trusted.is_empty() {
                 ui.add_space(6.0);
                 ui.label(theme::dim("Ishonchli ID'lar (ruxsat so'ralmaydi)"));
@@ -649,6 +708,17 @@ impl RelayPanel {
         if apply {
             self.cfg.save();
             self.start_agent();
+        }
+        if save_pw {
+            match ondemand::save_password(&self.unattended_pw) {
+                Ok(()) => {
+                    self.unattended_pw.clear();
+                    self.ondemand.stop();
+                    self.unattended_msg = Some((true, "Parol saqlandi.".into()));
+                    policy_changed = true;
+                }
+                Err(e) => self.unattended_msg = Some((false, format!("{e:#}"))),
+            }
         }
         if policy_changed {
             self.cfg.save();
