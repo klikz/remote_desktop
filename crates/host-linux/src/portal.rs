@@ -172,6 +172,14 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                 })
                 .collect();
             if mons.is_empty() {
+                if saved.is_some() {
+                    // Yangi portal saqlangan ruxsatni tiklaganda ekran manbasini qo'shmasligi mumkin: token
+                    // o'chiriladi va sessiya darhol qayta ochiladi, shunda ekran tanlash dialogi chiqadi.
+                    eprintln!("[portal] saqlangan ruxsat ekran oqimini bermadi: bekor qilinib, qayta so'raladi");
+                    let _ = std::fs::remove_file(&token_path);
+                    let _ = session.close().await;
+                    return Err(anyhow::Error::new(NoControl));
+                }
                 return Err(anyhow!("portal oqim bermadi"));
             }
             // Chapdan o'ngga, so'ng tepadan pastga: tartib barqaror bo'lsin
@@ -357,7 +365,7 @@ fn note_err<T, E: std::fmt::Display>(count: &mut u32, what: &str, r: &Result<T, 
     }
 }
 
-/// Saqlangan ruxsatda boshqarish yo'q edi: sessiya yopildi, token o'chirildi, qayta ochish kerak.
+/// Saqlangan ruxsat yaroqsiz (boshqarish yoki ekran oqimi yo'q): sessiya yopildi, token o'chirildi, qayta ochish kerak.
 #[derive(Debug)]
 struct NoControl;
 
