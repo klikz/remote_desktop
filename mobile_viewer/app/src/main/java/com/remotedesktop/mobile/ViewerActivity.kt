@@ -113,6 +113,8 @@ class ViewerActivity : Activity(), KeySink {
     private var videoStarted = false
     private var kbVisible = false
     private var targetId = ""
+    /** Bo'sh emas = P2P (to'g'ridan-to'g'ri) ulanish, aks holda server orqali `targetId`. */
+    private var p2pAddr = ""
     private var lastStatsAt = 0L
     private var lastFrames = 0L
     private var lastBytes = 0L
@@ -133,16 +135,16 @@ class ViewerActivity : Activity(), KeySink {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         settings = Settings(this)
         targetId = intent.getStringExtra("id").orEmpty()
+        p2pAddr = intent.getStringExtra("addr").orEmpty()
         buildUi()
-        val ok = Native.connect(
-            targetId,
-            intent.getStringExtra("password").orEmpty(),
-            intent.getIntExtra("fps", 30),
-            intent.getIntExtra("kbps", 8000),
-            intent.getIntExtra("height", 1080),
-        )
+        val password = intent.getStringExtra("password").orEmpty()
+        val fps = intent.getIntExtra("fps", 30)
+        val kbps = intent.getIntExtra("kbps", 8000)
+        val height = intent.getIntExtra("height", 1080)
+        val ok = if (p2pAddr.isNotEmpty()) Native.connectDirect(p2pAddr, password, fps, kbps, height)
+        else Native.connect(targetId, password, fps, kbps, height)
         if (!ok) overlay.text = "Agent ishlamayapti. Server sozlamalarini tekshiring."
-        else overlay.text = "Ulanilmoqda...\nHost ruxsat berishini kuting"
+        else overlay.text = if (p2pAddr.isNotEmpty()) "Ulanilmoqda...\n$p2pAddr" else "Ulanilmoqda...\nHost ruxsat berishini kuting"
         handler.post(poll)
     }
 
@@ -250,8 +252,12 @@ class ViewerActivity : Activity(), KeySink {
                 .setNegativeButton("Bekor") { _, _ -> Native.confirm(false) }
                 .show()
             "connected" -> {
-                settings.addContact(targetId)
-                AgentManager.subscribe()
+                if (p2pAddr.isNotEmpty()) {
+                    settings.addP2pHost(p2pAddr)
+                } else {
+                    settings.addContact(targetId)
+                    AgentManager.subscribe()
+                }
                 overlay.text = "Video kutilmoqda..."
             }
             "video" -> {

@@ -38,6 +38,11 @@ pub struct HostPanel {
     host_current: bool,
     #[cfg(target_os = "linux")]
     autologin: bool,
+    /// Kirishda dasturni o'zi ochish (`~/.config/autostart`).
+    #[cfg(target_os = "linux")]
+    app_autostart: bool,
+    #[cfg(target_os = "linux")]
+    autostart_msg: Option<(bool, String)>,
 }
 
 fn local_ip() -> String {
@@ -114,6 +119,10 @@ impl HostPanel {
             host_current: super::linuxhost::installed_is_current(),
             #[cfg(target_os = "linux")]
             autologin: true,
+            #[cfg(target_os = "linux")]
+            app_autostart: super::linuxhost::app_autostart_enabled(),
+            #[cfg(target_os = "linux")]
+            autostart_msg: None,
         }
     }
 
@@ -293,7 +302,7 @@ impl HostPanel {
         #[cfg(target_os = "linux")]
         let svc_installed = self.svc.as_ref().map_or(false, |s| s.2);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            theme::page_title(ui, "Sozlamalar", &["Boshqa kompyuterlar shu manzil, port va kalit bilan ulana oladi."]);
+            theme::page_title(ui, "P2P Sozlash",&["Boshqa kompyuterlar shu manzil, port va kalit bilan ulana oladi."]);
 
             theme::card(ui, Some("HOLAT"), |ui| {
                 ui.horizontal(|ui| {
@@ -426,6 +435,26 @@ impl HostPanel {
                             ui.ctx().output_mut(|o| o.copied_text = text.clone());
                         }
                     }
+                }
+            });
+
+            #[cfg(target_os = "linux")]
+            theme::card(ui, Some("AVTOMATIK ISHGA TUSHIRISH"), |ui| {
+                let mut on = self.app_autostart;
+                if theme::toggle(ui, &mut on, "Ubuntu'ga kirilganda dasturni avtomatik ochish").changed() {
+                    match super::linuxhost::set_app_autostart(on) {
+                        Ok(()) => {
+                            self.app_autostart = on;
+                            self.autostart_msg = None;
+                        }
+                        Err(e) => self.autostart_msg = Some((false, e)),
+                    }
+                }
+                theme::hint(ui, "Dastur yig'ilgan holda ochiladi; \"Server orqali\" yoqilgan bo'lsa, ID bilan ulanishga tayyor turadi.");
+                theme::hint(ui, "Host xizmati (yuqorida) esa alohida: u ham kompyuter yonganda o'zi ishga tushadi.");
+                if let Some((ok, text)) = &self.autostart_msg {
+                    ui.add_space(4.0);
+                    theme::note(ui, text, if *ok { theme::GOOD } else { theme::BAD });
                 }
             });
 

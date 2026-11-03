@@ -38,6 +38,8 @@ enum Cmd {
     OpenStream(usize, oneshot::Sender<Result<StreamInfo>>),
     Input(InputEvent),
     SetPhysical(i32, i32),
+    /// Saqlangan ruxsatni bekor qilib, sessiyani qaytadan ochadi (dialog yana chiqadi).
+    Reset,
 }
 
 #[derive(Clone)]
@@ -65,6 +67,11 @@ impl PortalHandle {
     /// Oqimning haqiqiy kadr o'lchami (piksel). Logik o'lchamdan katta bo'lsa, ekran masshtabli.
     pub async fn set_physical_size(&self, w: i32, h: i32) {
         let _ = self.tx.send(Cmd::SetPhysical(w, h)).await;
+    }
+
+    /// Ruxsatni bekor qiladi: token o'chiriladi, sessiya yopilib, ruxsat dialogi qaytadan chiqadi.
+    pub async fn reset(&self) {
+        let _ = self.tx.send(Cmd::Reset).await;
     }
 
     /// Ekran oqimi uchun PipeWire ulanishini so'raydi (kerak bo'lsa sessiyani ochadi).
@@ -104,6 +111,10 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
         if first.is_none() && !eager {
             match rx.recv().await {
                 Some(c @ Cmd::OpenStream(..)) => first = Some(c),
+                Some(Cmd::Reset) => {
+                    let _ = std::fs::remove_file(&token_path);
+                    eager = true;
+                }
                 Some(_) => continue, // sessiya yo'q: kiritish hodisasi e'tiborsiz qoldiriladi
                 None => return,
             }
@@ -207,6 +218,10 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                         _ = tokio::time::sleep(std::time::Duration::from_secs(backoff)) => {}
                         c = rx.recv() => match c {
                             Some(c @ Cmd::OpenStream(..)) => first = Some(c),
+                            Some(Cmd::Reset) => {
+                                let _ = std::fs::remove_file(&token_path);
+                                backoff = 3;
+                            }
                             Some(_) => {}
                             None => return,
                         },
@@ -313,6 +328,12 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                         f64::from(w) / f64::from(cur.w.max(1))
                     );
                     continue;
+                }
+                Cmd::Reset => {
+                    eprintln!("[portal] ruxsat bekor qilinmoqda: sessiya qaytadan ochiladi");
+                    let _ = std::fs::remove_file(&token_path);
+                    let _ = session.close().await;
+                    break;
                 }
                 Cmd::OpenStream(w, r) => (w, r),
             };

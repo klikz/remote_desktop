@@ -56,6 +56,24 @@ class Settings(ctx: Context) {
         get() = p.getString("lastTarget", "") ?: ""
         set(v) = p.edit().putString("lastTarget", v).apply()
 
+    /** true = P2P (to'g'ridan-to'g'ri), false = server orqali. */
+    var p2p: Boolean
+        get() = p.getBoolean("p2p", false)
+        set(v) = p.edit().putBoolean("p2p", v).apply()
+
+    var lastAddr: String
+        get() = p.getString("lastAddr", "") ?: ""
+        set(v) = p.edit().putString("lastAddr", v).apply()
+
+    /** Muvaffaqiyatli ulangan P2P manzillar (`host:port`), oxirgisi birinchi. */
+    var p2pHosts: List<String>
+        get() = (p.getString("p2pHosts", "") ?: "").lines().filter { it.isNotBlank() }
+        set(v) = p.edit().putString("p2pHosts", v.joinToString("\n")).apply()
+
+    fun addP2pHost(addr: String) {
+        p2pHosts = (listOf(addr) + p2pHosts.filter { it != addr }).take(20)
+    }
+
     /** `host` yoki `host:port` -> `host:port` (relay standart porti 7780). */
     fun serverAddr(): String {
         val s = server.trim()

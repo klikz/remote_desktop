@@ -98,6 +98,7 @@ async fn run_host(args: &[String]) -> Result<()> {
 /// Bitta Viewer sessiyasi: control xabarlari va video.
 async fn session(mut io: SessionIo, portal: PortalHandle) {
     let mut video: Option<JoinHandle<()>> = None;
+    let files = rdcore::filexfer::spawn_server(io.conn.clone());
     loop {
         match read_message(&mut io.recv).await {
             Ok(Message::Ping { id, sent_ms }) => {
@@ -122,10 +123,15 @@ async fn session(mut io: SessionIo, portal: PortalHandle) {
                 }
             }
             Ok(Message::Input(ev)) => portal.input(ev).await,
+            Ok(Message::ResetPermissions) => {
+                println!("[host] Viewer ruxsatni qayta berishni so'radi");
+                portal.reset().await;
+            }
             Ok(Message::Bye { .. }) | Err(_) => break,
             Ok(_) => {}
         }
     }
+    files.abort();
     if let Some(h) = video {
         h.abort(); // kodlagich ham to'xtaydi
     }

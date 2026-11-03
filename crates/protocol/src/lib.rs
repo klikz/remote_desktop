@@ -169,6 +169,8 @@ pub enum Message {
     VideoFailed { reason: u8 },
     /// Viewer -> Host: kiritish hodisasi.
     Input(InputEvent),
+    /// Viewer -> Host: saqlangan ekran/boshqarish ruxsatini bekor qilib, qaytadan so'raydi (Linux Host).
+    ResetPermissions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,6 +211,7 @@ const TAG_VIDEO_REQUEST: u8 = 9;
 const TAG_VIDEO_STARTED: u8 = 10;
 const TAG_VIDEO_FAILED: u8 = 11;
 const TAG_INPUT: u8 = 12;
+const TAG_RESET_PERMISSIONS: u8 = 13;
 
 struct Reader<'a> {
     buf: &'a [u8],
@@ -343,6 +346,7 @@ impl Message {
                 out.push(TAG_VIDEO_FAILED);
                 out.push(*reason);
             }
+            Message::ResetPermissions => out.push(TAG_RESET_PERMISSIONS),
             Message::Input(ev) => {
                 out.push(TAG_INPUT);
                 match ev {
@@ -430,6 +434,7 @@ impl Message {
                 kbps: r.u32()?,
             },
             TAG_VIDEO_FAILED => Message::VideoFailed { reason: r.u8()? },
+            TAG_RESET_PERMISSIONS => Message::ResetPermissions,
             TAG_INPUT => Message::Input(match r.u8()? {
                 1 => InputEvent::PointerMove { x: r.u16()?, y: r.u16()? },
                 2 => InputEvent::Button { button: r.u8()?, pressed: r.u8()? != 0 },
@@ -509,6 +514,7 @@ mod tests {
             Message::Input(InputEvent::Button { button: 2, pressed: true }),
             Message::Input(InputEvent::Scroll { dx: -3, dy: 7 }),
             Message::Input(InputEvent::Key { code: 30, pressed: false }),
+            Message::ResetPermissions,
         ]
     }
 

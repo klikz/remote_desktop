@@ -32,6 +32,14 @@ class MainActivity : Activity() {
     private lateinit var nameEdit: EditText
     private lateinit var idEdit: EditText
     private lateinit var passEdit: EditText
+    private lateinit var addrEdit: EditText
+    private lateinit var descLabel: TextView
+    private lateinit var modeRelayBtn: android.widget.Button
+    private lateinit var modeP2pBtn: android.widget.Button
+    private lateinit var contactsCard: LinearLayout
+    private lateinit var p2pCard: LinearLayout
+    private lateinit var p2pBox: LinearLayout
+    private var p2pMode = false
     private lateinit var contactsBox: LinearLayout
     private lateinit var presetGroup: RadioGroup
     private lateinit var fpsBar: SeekBar
@@ -49,6 +57,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         settings = Settings(this)
         Native.init(filesDir.absolutePath)
+        p2pMode = settings.p2p
         fps = settings.fps
         kbps = settings.kbps
         height = settings.height
@@ -58,6 +67,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        refreshP2pHosts()
         AgentManager.listener = {
             refreshStatus()
             refreshContacts()
@@ -83,7 +93,16 @@ class MainActivity : Activity() {
 
         // --- ulanish kartasi
         idEdit = edit("9 xonali ID", settings.lastTarget, InputType.TYPE_CLASS_NUMBER)
+        addrEdit = edit("Host manzili (IP yoki nom, masalan 192.168.1.5:7777)", settings.lastAddr, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
         passEdit = edit("Kalit (agar kerak bo'lsa)", "", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        descLabel = label("", 12f, Colors.DIM)
+        modeRelayBtn = button("Server orqali") { setMode(false) }
+        modeP2pBtn = button("P2P") { setMode(true) }
+        val modeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(modeRelayBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(modeP2pBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
+        }
         presetGroup = RadioGroup(this).apply {
             PRESETS.forEachIndexed { i, p ->
                 addView(
@@ -107,9 +126,11 @@ class MainActivity : Activity() {
         val advanced = advancedBox()
         root.addView(
             card(
-                label("Server orqali ulanish", 16f, bold = true),
-                label("Boshqa kompyuterning ID sini kiriting. Ruxsat berilgach ulanasiz.", 12f, Colors.DIM),
+                label("Ulanish", 16f, bold = true),
+                modeRow,
+                descLabel,
                 idEdit,
+                addrEdit,
                 passEdit,
                 label("Sifat", 13f, Colors.DIM),
                 presetGroup,
@@ -122,10 +143,15 @@ class MainActivity : Activity() {
             lp(top = 16),
         )
         syncQualityViews()
+        applyMode()
 
         // --- kontaktlar
         contactsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(card(label("Kontaktlar", 16f, bold = true), contactsBox), lp(top = 12))
+        contactsCard = card(label("Kontaktlar", 16f, bold = true), contactsBox)
+        root.addView(contactsCard, lp(top = 12))
+        p2pBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        p2pCard = card(label("Saqlangan kompyuterlar", 16f, bold = true), p2pBox)
+        root.addView(p2pCard, lp(top = 12))
 
         // --- server sozlamalari
         serverEdit = edit("Server manzili (host yoki host:port)", settings.server, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
@@ -242,6 +268,54 @@ class MainActivity : Activity() {
         serverState.setTextColor(if (AgentManager.online) Colors.GOOD else Colors.DIM)
     }
 
+    private fun setMode(p2p: Boolean) {
+        p2pMode = p2p
+        settings.p2p = p2p
+        applyMode()
+    }
+
+    /** Server orqali (ID) yoki P2P (manzil) rejimiga mos maydonlar va ro'yxatlar. */
+    private fun applyMode() {
+        modeRelayBtn.background = rounded(if (p2pMode) Colors.BG else Colors.ACCENT, 8)
+        modeP2pBtn.background = rounded(if (p2pMode) Colors.ACCENT else Colors.BG, 8)
+        modeRelayBtn.setTextColor(if (p2pMode) Colors.TEXT else android.graphics.Color.WHITE)
+        modeP2pBtn.setTextColor(if (p2pMode) android.graphics.Color.WHITE else Colors.TEXT)
+        descLabel.text = if (p2pMode) {
+            "Boshqa kompyuterning manzili va kalitini kiriting. Server shart emas."
+        } else {
+            "Boshqa kompyuterning ID sini kiriting. Ruxsat berilgach ulanasiz."
+        }
+        idEdit.visibility = if (p2pMode) View.GONE else View.VISIBLE
+        addrEdit.visibility = if (p2pMode) View.VISIBLE else View.GONE
+        passEdit.hint = if (p2pMode) "Kalit" else "Kalit (agar kerak bo'lsa)"
+        contactsCard.visibility = if (p2pMode) View.GONE else View.VISIBLE
+        p2pCard.visibility = if (p2pMode) View.VISIBLE else View.GONE
+        refreshP2pHosts()
+    }
+
+    private fun refreshP2pHosts() {
+        p2pBox.removeAllViews()
+        val list = settings.p2pHosts
+        if (list.isEmpty()) {
+            p2pBox.addView(label("Hozircha yo'q. Muvaffaqiyatli ulanishdan keyin shu yerda paydo bo'ladi.", 12f, Colors.DIM))
+            return
+        }
+        for (a in list) {
+            val row = label(a, 15f)
+            row.setPadding(0, dp(8), 0, dp(8))
+            row.setOnClickListener { addrEdit.setText(a) }
+            row.setOnLongClickListener {
+                AlertDialog.Builder(this).setMessage("$a manzilini o'chirish?")
+                    .setPositiveButton("O'chirish") { _, _ ->
+                        settings.p2pHosts = settings.p2pHosts.filter { it != a }
+                        refreshP2pHosts()
+                    }.setNegativeButton("Bekor", null).show()
+                true
+            }
+            p2pBox.addView(row)
+        }
+    }
+
     private fun refreshContacts() {
         contactsBox.removeAllViews()
         val list = settings.contacts
@@ -270,7 +344,32 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun connectP2p() {
+        val addr = addrEdit.text.toString().trim()
+        if (addr.isEmpty()) {
+            addrEdit.error = "Manzilni kiriting"
+            return
+        }
+        if (passEdit.text.isEmpty()) {
+            passEdit.error = "Kalitni kiriting"
+            return
+        }
+        settings.fps = fps
+        settings.kbps = kbps
+        settings.height = height
+        settings.lastAddr = addr
+        startActivity(
+            Intent(this, ViewerActivity::class.java)
+                .putExtra("addr", addr)
+                .putExtra("password", passEdit.text.toString())
+                .putExtra("fps", fps)
+                .putExtra("kbps", kbps)
+                .putExtra("height", height),
+        )
+    }
+
     private fun connect() {
+        if (p2pMode) return connectP2p()
         val id = idEdit.text.toString().trim()
         if (id.length != 9 || !id.all(Char::isDigit)) {
             idEdit.error = "9 ta raqam kerak"

@@ -14,6 +14,7 @@ mod linuxhost;
 mod relaypanel;
 mod session;
 mod theme;
+mod welcome;
 #[cfg(windows)]
 mod tray;
 
@@ -25,7 +26,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub fn run() -> anyhow::Result<()> {
+/// `minimized`: oyna yig'ilgan holda ochiladi (kirishda avtostart).
+pub fn run(minimized: bool) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("MS Remote")
@@ -34,7 +36,7 @@ pub fn run() -> anyhow::Result<()> {
             .with_icon(std::sync::Arc::new(egui::IconData { rgba: crate::icon_draw::icon_rgba(256), width: 256, height: 256 })),
         ..Default::default()
     };
-    eframe::run_native("MS Remote", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+    eframe::run_native("MS Remote", options, Box::new(move |cc| Ok(Box::new(App::new(cc, minimized)))))
         .map_err(|e| anyhow::anyhow!("oyna ochilmadi: {e}"))
 }
 
@@ -122,8 +124,47 @@ struct Stats {
     kbps: f64,
 }
 
+/// Fayl uzatish qatori (ulanish ichidagi "Fayllar" panelida).
+struct Transfer {
+    id: u64,
+    name: String,
+    upload: bool,
+    done: u64,
+    total: u64,
+    /// `None` = davom etmoqda.
+    result: Option<Result<String, String>>,
+}
+
+#[derive(Default)]
+struct Files {
+    open: bool,
+    /// Host'dagi almashinuv papkasi (`None` = hali olinmagan).
+    remote: Option<Result<Vec<session::RemoteFile>, String>>,
+    transfers: Vec<Transfer>,
+}
+
+fn fmt_size(n: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut v = n as f64;
+    let mut u = 0;
+    while v >= 1024.0 && u < UNITS.len() - 1 {
+        v /= 1024.0;
+        u += 1;
+    }
+    if u == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", UNITS[u])
+    }
+}
+
 struct App {
+    /// Ochilishdagi dialog (yopilgach `None`).
+    welcome: Option<welcome::Welcome>,
     tab: Tab,
+    files: Files,
+    /// Avtostartda birinchi kadrda oyna yig'iladi.
+    start_minimized: bool,
     host: hostpanel::HostPanel,
     relay: relaypanel::RelayPanel,
     /// Server orqali ulanayotgan ID (muvaffaqiyatda kontaktlarga saqlanadi).
@@ -133,6 +174,8 @@ struct App {
     selected: Option<usize>,
     form: Form,
     error: Option<String>,
+    /// Host ekranni ola olmadi: ulanish ochiq, ruxsatni qaytadan berish tugmasi ko'rsatiladi.
+    refused: Option<String>,
     handle: Option<session::Handle>,
     confirm: Option<(String, mpsc::Sender<bool>)>,
     fingerprint: String,
@@ -149,11 +192,14 @@ struct App {
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, minimized: bool) -> Self {
         theme::apply(&cc.egui_ctx);
         let hosts = hosts::load();
         let mut app = App {
+            welcome: Some(welcome::Welcome::new(&cc.egui_ctx)),
             tab: Tab::Relay,
+            files: Files::default(),
+            start_minimized: minimized,
             host: hostpanel::HostPanel::new(),
             relay: relaypanel::RelayPanel::new(),
             relay_target: None,
@@ -174,6 +220,7 @@ impl App {
                 save: true,
             },
             error: None,
+            refused: None,
             handle: None,
             confirm: None,
             fingerprint: String::new(),
@@ -324,7 +371,9 @@ impl App {
         }
         self.handle = None;
         self.confirm = None;
+        self.refused = None;
         self.tex = None;
+        self.files = Files::default();
         self.screen = Screen::Form;
         ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
     }
@@ -332,6 +381,7 @@ impl App {
     fn poll_session(&mut self, ctx: &egui::Context) {
         let mut ended: Option<Option<String>> = None;
         let mut connected = false;
+        let mut refresh_files = false;
         if let Some(h) = &self.handle {
             while let Ok(ev) = h.events.try_recv() {
                 match ev {
@@ -343,9 +393,35 @@ impl App {
                         self.fingerprint = fingerprint;
                         connected = true;
                     }
-                    session::Event::VideoStarted => self.screen = Screen::Viewing,
+                    session::Event::VideoStarted => {
+                        self.refused = None;
+                        self.screen = Screen::Viewing;
+                    }
+                    session::Event::VideoRefused(msg) => self.refused = Some(msg),
+                    session::Event::Files(r) => self.files.remote = Some(r),
+                    session::Event::Transfer { id, done, total, result } => {
+                        let succeeded = matches!(result, Some(Ok(_)));
+                        if let Some(t) = self.files.transfers.iter_mut().find(|t| t.id == id) {
+                            if total > 0 {
+                                t.total = total;
+                            }
+                            match &result {
+                                None => t.done = done,
+                                Some(Ok(_)) => t.done = t.total,
+                                Some(Err(_)) => {}
+                            }
+                            // yuborilgan fayl Host ro'yxatida ko'rinishi uchun
+                            refresh_files |= succeeded && t.upload;
+                            t.result = result;
+                        }
+                    }
                     session::Event::Ended(msg) => ended = Some(msg),
                 }
+            }
+        }
+        if refresh_files {
+            if let Some(h) = &self.handle {
+                h.list_files();
             }
         }
         if connected {
@@ -379,7 +455,7 @@ impl App {
                 theme::dot(ui, theme::ACCENT);
                 ui.label(RichText::new("MS Remote").size(16.0).strong());
                 ui.add_space(14.0);
-                for (t, name) in [(Tab::Relay, "Server orqali"), (Tab::Connect, "P2P"), (Tab::ThisPc, "Sozlamalar"), (Tab::Host, "HOST")] {
+                for (t, name) in [(Tab::Relay, "Server orqali"), (Tab::Connect, "P2P"), (Tab::ThisPc, "P2P Sozlash"), (Tab::Host, "HOST")] {
                     if theme::tab(ui, self.tab == t, name).clicked() {
                         self.tab = t;
                     }
@@ -584,21 +660,44 @@ impl App {
 
     fn ui_connecting(&mut self, ctx: &egui::Context) {
         let mut cancel = false;
+        let mut reset = false;
         egui::CentralPanel::default().frame(theme::page_frame()).show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space((ui.available_height() / 3.0).max(20.0));
-                ui.add(egui::Spinner::new().size(34.0).color(theme::ACCENT));
-                ui.add_space(12.0);
-                let what = if self.fingerprint.is_empty() { "Ulanilmoqda" } else { "Video kutilmoqda" };
+                if self.refused.is_none() {
+                    ui.add(egui::Spinner::new().size(34.0).color(theme::ACCENT));
+                    ui.add_space(12.0);
+                }
+                let what = if self.refused.is_some() {
+                    "Ekran olinmadi"
+                } else if self.fingerprint.is_empty() {
+                    "Ulanilmoqda"
+                } else {
+                    "Video kutilmoqda"
+                };
                 ui.label(RichText::new(what).size(17.0).strong());
                 ui.label(theme::dim(&self.title));
                 if self.relay_target.is_some() && self.fingerprint.is_empty() {
                     theme::hint(ui, "Qabul qiluvchi ruxsat berishi kutilmoqda (30 soniyagacha)");
                 }
+                if let Some(msg) = &self.refused {
+                    ui.add_space(10.0);
+                    theme::error_banner(ui, msg);
+                    ui.add_space(6.0);
+                    theme::hint(ui, "Host kompyuterida ruxsat dialogi chiqadi: ekranni tanlab, ulashishga ruxsat bering");
+                    ui.add_space(10.0);
+                    reset = ui.add(egui::Button::new("Ruxsatni qaytadan berish").min_size(egui::vec2(220.0, 32.0))).clicked();
+                }
                 ui.add_space(14.0);
                 cancel = ui.add(egui::Button::new("Bekor qilish").min_size(egui::vec2(140.0, 32.0))).clicked();
             });
         });
+        if reset {
+            self.refused = None;
+            if let Some(h) = &self.handle {
+                h.reset_permissions();
+            }
+        }
         if cancel {
             self.disconnect(ctx);
         }
@@ -665,6 +764,8 @@ impl App {
         let hover = ctx.input(|i| i.pointer.hover_pos());
         let show_bar = !fullscreen || hover.map_or(false, |p| p.y < 40.0);
         let mut want_disconnect = false;
+        let mut want_reset = false;
+        let mut want_files = false;
         if show_bar {
             let rtt_color = if rtt < 60.0 {
                 theme::GOOD
@@ -692,10 +793,24 @@ impl App {
                         if theme::pill(ui, self.input_on, "Boshqaruv").clicked() {
                             self.input_on = !self.input_on;
                         }
+                        if theme::pill(ui, self.files.open, "Fayllar")
+                            .on_hover_text("Host bilan fayl almashish (fayllarni shu oynaga sudrab tashlash ham mumkin)")
+                            .clicked()
+                        {
+                            want_files = true;
+                        }
+                        if theme::button(ui, "Ruxsatni qaytadan berish")
+                            .on_hover_text("Host'dagi ekran va boshqarish ruxsatini bekor qilib, qaytadan so'raydi (Linux Host). Ulanish uziladi.")
+                            .clicked()
+                        {
+                            want_reset = true;
+                        }
                     });
                 });
             });
         }
+
+        self.ui_files(ctx, want_files);
 
         // Yangi kadr bo'lsa tekstura yangilanadi
         if let Some(pic) = shared.picture.lock().unwrap().take() {
@@ -742,7 +857,12 @@ impl App {
             self.fwd.release_all(&mut |ev| h.input(ev));
         }
 
-        if want_disconnect {
+        if want_reset {
+            if let Some(h) = &self.handle {
+                h.reset_permissions();
+            }
+        }
+        if want_disconnect || want_reset {
             self.disconnect(ctx);
         }
         ctx.request_repaint_after(Duration::from_millis(500));
@@ -750,6 +870,109 @@ impl App {
 }
 
 impl App {
+    /// Fayl almashinuvi: oynaga tashlangan fayllarni Host'ga yuboradi va o'ng panelda Host papkasi bilan uzatishlarni ko'rsatadi.
+    fn ui_files(&mut self, ctx: &egui::Context, toggle: bool) {
+        let Some(h) = &self.handle else { return };
+        if toggle {
+            self.files.open = !self.files.open;
+            if self.files.open && self.files.remote.is_none() {
+                h.list_files();
+            }
+        }
+        let (dropped, hovering) = ctx.input(|i| {
+            (i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect::<Vec<_>>(), !i.raw.hovered_files.is_empty())
+        });
+        for path in dropped {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let total = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            let id = h.send_file(path);
+            self.files.transfers.push(Transfer { id, name, upload: true, done: 0, total, result: None });
+            if !self.files.open {
+                self.files.open = true;
+                h.list_files();
+            }
+        }
+        if hovering {
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("file_drop")));
+            let screen = ctx.screen_rect();
+            painter.rect_filled(screen, 0.0, Color32::from_black_alpha(150));
+            painter.text(screen.center(), Align2::CENTER_CENTER, "Faylni Host'ga yuborish uchun qo'yib yuboring", egui::FontId::proportional(20.0), Color32::WHITE);
+        }
+        if !self.files.open {
+            return;
+        }
+
+        let (mut refresh, mut clear, mut get) = (false, false, None::<String>);
+        egui::SidePanel::right("files").exact_width(300.0).resizable(false).frame(theme::side_frame()).show(ctx, |ui| {
+            ui.label(RichText::new("FAYLLAR").size(11.0).color(theme::DIM).strong());
+            ui.add_space(2.0);
+            theme::hint(ui, "Fayl yuborish: uni shu oynaga sudrab tashlang. U Host'ning \"MS Remote\" papkasiga tushadi.");
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                refresh = theme::button(ui, "Yangilash").clicked();
+                clear = theme::button(ui, "Tarixni tozalash").clicked();
+            });
+            ui.add_space(6.0);
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                ui.label(theme::dim("Host papkasidagi fayllar"));
+                ui.add_space(2.0);
+                match &self.files.remote {
+                    None => {
+                        ui.label(theme::dim("Yuklanmoqda..."));
+                    }
+                    Some(Err(e)) => theme::note(ui, e, theme::BAD),
+                    Some(Ok(list)) if list.is_empty() => theme::hint(ui, "Papka bo'sh."),
+                    Some(Ok(list)) => {
+                        for f in list {
+                            ui.label(RichText::new(&f.name).size(13.0));
+                            ui.horizontal(|ui| {
+                                ui.label(theme::dim(&fmt_size(f.size)));
+                                if theme::button(ui, "Yuklab olish").clicked() {
+                                    get = Some(f.name.clone());
+                                }
+                            });
+                            ui.add_space(4.0);
+                        }
+                    }
+                }
+                if !self.files.transfers.is_empty() {
+                    ui.add_space(8.0);
+                    ui.label(theme::dim("Uzatishlar"));
+                    ui.add_space(2.0);
+                }
+                for t in self.files.transfers.iter().rev() {
+                    ui.label(RichText::new(format!("{} {}", if t.upload { "↑" } else { "↓" }, t.name)).size(13.0));
+                    match &t.result {
+                        None => {
+                            let frac = if t.total > 0 { (t.done as f32 / t.total as f32).clamp(0.0, 1.0) } else { 0.0 };
+                            ui.add(egui::ProgressBar::new(frac).desired_height(8.0));
+                            ui.label(theme::dim(&format!("{} / {}", fmt_size(t.done), fmt_size(t.total))));
+                        }
+                        Some(Ok(msg)) => theme::note(ui, msg, theme::GOOD),
+                        Some(Err(e)) => theme::note(ui, e, theme::BAD),
+                    }
+                    ui.add_space(6.0);
+                }
+            });
+        });
+
+        if clear {
+            self.files.transfers.retain(|t| t.result.is_none());
+        }
+        if refresh {
+            self.files.remote = None;
+            h.list_files();
+        }
+        if let Some(name) = get {
+            let total = match &self.files.remote {
+                Some(Ok(list)) => list.iter().find(|f| f.name == name).map_or(0, |f| f.size),
+                _ => 0,
+            };
+            let id = h.get_file(name.clone());
+            self.files.transfers.push(Transfer { id, name, upload: false, done: 0, total, result: None });
+        }
+    }
+
     /// Tray: oyna yopilsa/pastga tushirilsa (agent yoqilgan bo'lsa) yashirinadi; ikonka orqali qaytadi.
     #[cfg(windows)]
     fn tray_update(&mut self, ctx: &egui::Context) {
@@ -792,6 +1015,9 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if std::mem::take(&mut self.start_minimized) {
+            ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
+        }
         self.tray_update(ctx);
         self.poll_session(ctx);
         self.relay.poll(ctx);
@@ -801,6 +1027,9 @@ impl eframe::App for App {
             Screen::Viewing => self.ui_viewing(ctx),
         }
         self.ui_confirm(ctx);
+        if self.welcome.as_ref().is_some_and(|w| !w.show(ctx)) {
+            self.welcome = None;
+        }
         self.relay.incoming_dialog(ctx);
     }
 }

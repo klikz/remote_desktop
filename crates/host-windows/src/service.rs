@@ -95,7 +95,7 @@ fn bind_host(ip: IpAddr, port: u16, creds: Option<Credentials>) -> Result<Host> 
     let creds = match creds {
         Some(c) => c,
         None => Credentials::load(&paths::host_password_file()?)
-            .context("kalit o'rnatilmagan: \"Sozlamalar\" bo'limida yoki `host-windows set-password` bilan o'rnating")?,
+            .context("kalit o'rnatilmagan: \"P2P Sozlash\" bo'limida yoki `host-windows set-password` bilan o'rnating")?,
     };
     let caps = Capabilities { codecs: CODEC_H264, max_fps: 60, monitors: vec![] };
     Host::bind(SocketAddr::new(ip, port), &identity, creds, caps)
@@ -259,6 +259,7 @@ async fn session(mut io: SessionIo, shared: Arc<Shared>) {
     shared.peers.lock().unwrap().push(Peer { id, ip: real_ip, via_tcp, since: Instant::now(), conn: io.conn.clone() });
     println!("[host] {real_ip}: ulandi{}", if via_tcp { " (TCP)" } else { "" });
     let mut video: Option<Video> = None;
+    let files = rdcore::filexfer::spawn_server(io.conn.clone());
     loop {
         match read_message(&mut io.recv).await {
             Ok(Message::Ping { id, sent_ms }) => {
@@ -284,6 +285,7 @@ async fn session(mut io: SessionIo, shared: Arc<Shared>) {
             Ok(_) => {}
         }
     }
+    files.abort();
     if let Some(v) = video {
         v.stop();
     }

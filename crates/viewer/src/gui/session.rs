@@ -3,22 +3,25 @@
 use anyhow::{Context, Result};
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
-use protocol::{InputEvent, DEFAULT_PORT};
+use protocol::{video_reason, InputEvent, DEFAULT_PORT};
 use rdcore::{
-    client::{connect_relayed, connect_with, ConnectOptions, Transport},
+    client::{connect_relayed, connect_with, ConnectOptions, Transport, VideoRefused},
+    filexfer,
     relay::agent::Connector,
     known_hosts::KnownHosts,
     paths,
 };
 use std::{
     net::{IpAddr, SocketAddr},
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc::{self, TrySendError},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
+pub use rdcore::filexfer::RemoteFile;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 #[derive(Clone)]
@@ -54,12 +57,22 @@ pub enum Event {
     Confirm(String, mpsc::Sender<bool>),
     Connected { fingerprint: String, via_tcp: bool },
     VideoStarted,
+    /// Host ekranni ola olmadi (xato matni). Ulanish ochiq: ruxsatni qaytadan berish mumkin.
+    VideoRefused(String),
     /// Ulanish tugadi. `Some` = xato matni.
     Ended(Option<String>),
+    /// Host'dagi almashinuv papkasi ro'yxati.
+    Files(Result<Vec<RemoteFile>, String>),
+    /// Fayl uzatish holati. `result`: `None` = davom etmoqda, `Some` = tugadi (`Ok` = saqlangan yo'l / xabar).
+    Transfer { id: u64, done: u64, total: u64, result: Option<Result<String, String>> },
 }
 
 enum Cmd {
     Input(InputEvent),
+    ResetPermissions,
+    ListFiles,
+    SendFile(u64, PathBuf),
+    GetFile(u64, String),
     Close,
 }
 
@@ -67,14 +80,34 @@ pub struct Handle {
     cmd: UnboundedSender<Cmd>,
     pub events: mpsc::Receiver<Event>,
     pub shared: Arc<Shared>,
+    next_transfer: AtomicU64,
 }
 
 impl Handle {
+    pub fn list_files(&self) {
+        let _ = self.cmd.send(Cmd::ListFiles);
+    }
+    /// Faylni Host'ga yuboradi. Uzatish identifikatorini qaytaradi (`Event::Transfer`).
+    pub fn send_file(&self, path: PathBuf) -> u64 {
+        let id = self.next_transfer.fetch_add(1, Ordering::Relaxed);
+        let _ = self.cmd.send(Cmd::SendFile(id, path));
+        id
+    }
+    /// Host'dagi faylni yuklab oladi. Uzatish identifikatorini qaytaradi (`Event::Transfer`).
+    pub fn get_file(&self, name: String) -> u64 {
+        let id = self.next_transfer.fetch_add(1, Ordering::Relaxed);
+        let _ = self.cmd.send(Cmd::GetFile(id, name));
+        id
+    }
     pub fn input(&self, ev: InputEvent) {
         let _ = self.cmd.send(Cmd::Input(ev));
     }
     pub fn close(&self) {
         let _ = self.cmd.send(Cmd::Close);
+    }
+    /// Host'dagi saqlangan ekran ruxsatini bekor qilib, qaytadan so'rashni talab qiladi.
+    pub fn reset_permissions(&self) {
+        let _ = self.cmd.send(Cmd::ResetPermissions);
     }
 }
 
@@ -101,7 +134,63 @@ pub fn start(ctx: egui::Context, p: Params) -> Handle {
         let _ = ev_tx.send(Event::Ended(msg));
         ctx.request_repaint();
     });
-    Handle { cmd: cmd_tx, events: ev_rx, shared }
+    Handle { cmd: cmd_tx, events: ev_rx, shared, next_transfer: AtomicU64::new(1) }
+}
+
+/// Uzatish borishini UI'ga yetkazadi (juda tez-tez emas: 100 ms da bir marta).
+struct Reporter {
+    id: u64,
+    ev_tx: mpsc::Sender<Event>,
+    ctx: egui::Context,
+    last: Instant,
+}
+
+impl Reporter {
+    fn progress(&mut self, done: u64, total: u64) {
+        if done < total && self.last.elapsed() < Duration::from_millis(100) {
+            return;
+        }
+        self.last = Instant::now();
+        let _ = self.ev_tx.send(Event::Transfer { id: self.id, done, total, result: None });
+        self.ctx.request_repaint();
+    }
+
+    fn finish(&self, total: u64, result: Result<String, String>) {
+        let done = if result.is_ok() { total } else { 0 };
+        let _ = self.ev_tx.send(Event::Transfer { id: self.id, done, total, result: Some(result) });
+        self.ctx.request_repaint();
+    }
+}
+
+/// Fayl buyruqlarini alohida vazifalarda bajaradi (video va boshqa uzatishlar to'xtamaydi).
+fn spawn_file_cmd(conn: rdcore::quinn::Connection, ctx: &egui::Context, ev_tx: &mpsc::Sender<Event>, cmd: Cmd) {
+    let reporter = |id| Reporter { id, ev_tx: ev_tx.clone(), ctx: ctx.clone(), last: Instant::now() };
+    match cmd {
+        Cmd::ListFiles => {
+            let (ev_tx, ctx) = (ev_tx.clone(), ctx.clone());
+            tokio::spawn(async move {
+                let r = filexfer::list(&conn).await.map_err(|e| format!("{e:#}"));
+                let _ = ev_tx.send(Event::Files(r));
+                ctx.request_repaint();
+            });
+        }
+        Cmd::SendFile(id, path) => {
+            let mut rep = reporter(id);
+            tokio::spawn(async move {
+                let total = tokio::fs::metadata(&path).await.map(|m| m.len()).unwrap_or(0);
+                let r = filexfer::upload(&conn, &path, &mut |d, t| rep.progress(d, t)).await;
+                rep.finish(total, r.map(|_| "Host'ga yuborildi".to_string()).map_err(|e| format!("{e:#}")));
+            });
+        }
+        Cmd::GetFile(id, name) => {
+            let mut rep = reporter(id);
+            tokio::spawn(async move {
+                let r = filexfer::download(&conn, &name, &mut |d, t| rep.progress(d, t)).await;
+                rep.finish(0, r.map(|p| p.display().to_string()).map_err(|e| format!("{e:#}")));
+            });
+        }
+        _ => {}
+    }
 }
 
 async fn resolve(target: &str) -> Result<SocketAddr> {
@@ -172,7 +261,31 @@ async fn run(
     let _ = ev_tx.send(Event::Connected { fingerprint: session.fingerprint.clone(), via_tcp: session.via_tcp });
     ctx.request_repaint();
 
-    let mut stream = session.request_video(p.fps, p.kbps, p.height, 0).await?;
+    // Host ekranni ola olmasa (ruxsat yo'q yoki noto'g'ri berilgan) ulanish uzilmaydi: foydalanuvchi
+    // ruxsatni bekor qilib qaytadan berishi (yoki bekor qilishi) mumkin.
+    let mut stream = loop {
+        match session.request_video(p.fps, p.kbps, p.height, 0).await {
+            Ok(s) => break s,
+            Err(e) if e.downcast_ref::<VideoRefused>().map_or(false, |v| v.0 == video_reason::NO_CAPTURE) => {
+                let _ = ev_tx.send(Event::VideoRefused(format!("{e:#}")));
+                ctx.request_repaint();
+                loop {
+                    match cmd_rx.recv().await {
+                        Some(Cmd::ResetPermissions) => {
+                            session.reset_permissions().await?;
+                            break;
+                        }
+                        Some(Cmd::Input(_) | Cmd::ListFiles | Cmd::SendFile(..) | Cmd::GetFile(..)) => {}
+                        Some(Cmd::Close) | None => {
+                            session.close().await;
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    };
     let _ = ev_tx.send(Event::VideoStarted);
     ctx.request_repaint();
 
@@ -238,6 +351,14 @@ async fn run(
                     if let Err(e) = session.send_input(ev).await {
                         break Some(format!("{e:#}"));
                     }
+                }
+                Some(Cmd::ResetPermissions) => {
+                    if let Err(e) = session.reset_permissions().await {
+                        break Some(format!("{e:#}"));
+                    }
+                }
+                Some(c @ (Cmd::ListFiles | Cmd::SendFile(..) | Cmd::GetFile(..))) => {
+                    spawn_file_cmd(session.connection(), &ctx, &ev_tx, c);
                 }
                 Some(Cmd::Close) | None => break None,
             },

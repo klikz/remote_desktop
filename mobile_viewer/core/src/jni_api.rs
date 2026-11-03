@@ -113,19 +113,47 @@ pub extern "system" fn Java_com_remotedesktop_mobile_Native_connect(
     let id = s(&mut env, &id);
     let password = s(&mut env, &password);
     let Some(connector) = lock(&AGENT).as_ref().map(|a| a.connector()) else { return JNI_FALSE };
-    let params = Params {
+    start_session(Params {
         id,
+        addr: String::new(),
         password,
         fps: fps.clamp(1, 120) as u16,
         kbps: kbps.clamp(100, 100_000) as u32,
         height: height.clamp(0, 4320) as u16,
-        connector,
-    };
+        connector: Some(connector),
+    })
+}
+
+fn start_session(params: Params) -> jboolean {
     let sess = session::start(params);
     if let Some(old) = lock(&SESSION).replace(sess) {
         old.close();
     }
     JNI_TRUE
+}
+
+/// P2P (to'g'ridan-to'g'ri) sessiya: `addr` = `IP`, `IP:port` yoki `nom[:port]`. Agent shart emas.
+#[no_mangle]
+pub extern "system" fn Java_com_remotedesktop_mobile_Native_connectDirect(
+    mut env: JNIEnv,
+    _o: JObject,
+    addr: JString,
+    password: JString,
+    fps: jint,
+    kbps: jint,
+    height: jint,
+) -> jboolean {
+    let addr = s(&mut env, &addr);
+    let password = s(&mut env, &password);
+    start_session(Params {
+        id: String::new(),
+        addr,
+        password,
+        fps: fps.clamp(1, 120) as u16,
+        kbps: kbps.clamp(100, 100_000) as u32,
+        height: height.clamp(0, 4320) as u16,
+        connector: None,
+    })
 }
 
 /// Sessiya hodisasi: `confirm\tfp`, `connected\tfp\t0|1`, `video`, `ended\terror`; yo'q bo'lsa null.

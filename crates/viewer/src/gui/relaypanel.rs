@@ -579,7 +579,7 @@ impl RelayPanel {
                 "HOST: server rejimi",
                 &[
                     "Bu kompyuter boshqa kompyuterlarni bir-biriga ulab beruvchi server bo'ladi (\"Server orqali\" bo'limi uchun).",
-                    "Eslatma: \"Sozlamalar\" bo'limi esa shu kompyuterning o'zini P2P uchun ochadi, bu boshqa narsa.",
+                    "Eslatma: \"P2P Sozlash\" bo'limi esa shu kompyuterning o'zini P2P uchun ochadi, bu boshqa narsa.",
                 ],
             );
             self.card_server(ui);

@@ -19,6 +19,9 @@ object Native {
     // --- sessiya ---
     external fun connect(id: String, password: String, fps: Int, kbps: Int, height: Int): Boolean
 
+    /** P2P (to'g'ridan-to'g'ri) sessiya: `addr` = `IP`, `IP:port` yoki `nom[:port]`. Agent shart emas. */
+    external fun connectDirect(addr: String, password: String, fps: Int, kbps: Int, height: Int): Boolean
+
     /** `confirm\tfp`, `connected\tfp\t0|1`, `video`, `ended\terror` yoki null. */
     external fun pollEvent(): String?
     external fun confirm(accept: Boolean)

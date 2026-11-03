@@ -244,7 +244,30 @@ impl VideoStream {
     }
 }
 
+/// Host videoni boshlashdan bosh tortdi (`video_reason` kodi).
+#[derive(Debug)]
+pub struct VideoRefused(pub u8);
+
+impl std::fmt::Display for VideoRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Host videoni boshlay olmadi: {}", video_reason::describe(self.0))
+    }
+}
+
+impl std::error::Error for VideoRefused {}
+
 impl Session {
+    /// Ulanish tutqichi: fayl almashinuvi kabi qo'shimcha oqimlar ochish uchun (`filexfer`).
+    pub fn connection(&self) -> quinn::Connection {
+        self.conn.clone()
+    }
+
+    /// Host'dan saqlangan ekran ruxsatini bekor qilib, qaytadan so'rashni talab qiladi.
+    pub async fn reset_permissions(&mut self) -> Result<()> {
+        write_message(&mut self.send, &Message::ResetPermissions).await?;
+        Ok(())
+    }
+
     /// Host'ga sichqoncha/klaviatura hodisasini yuboradi.
     pub async fn send_input(&mut self, ev: protocol::InputEvent) -> Result<()> {
         write_message(&mut self.send, &Message::Input(ev)).await?;
@@ -265,9 +288,7 @@ impl Session {
                     .context("video oqimini qabul qilib bo'lmadi")?;
                 Ok(VideoStream { recv, codec, fps, kbps })
             }
-            Message::VideoFailed { reason } => {
-                bail!("Host videoni boshlay olmadi: {}", video_reason::describe(reason))
-            }
+            Message::VideoFailed { reason } => Err(VideoRefused(reason).into()),
             other => bail!("kutilmagan javob: {other:?}"),
         }
     }

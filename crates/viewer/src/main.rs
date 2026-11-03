@@ -26,6 +26,7 @@ viewer: Remote Desktop Viewer
 
 Foydalanish:
   viewer                               oynali interfeys (tavsiya etiladi)
+  viewer --autostart                   oynali interfeys, oyna yig'ilgan holda (Ubuntu avtostarti)
   viewer connect <manzil[:port]> [--video SEKUND] [--fps N] [--kbps N] [--height N] [--monitor N] [--tcp | --udp] [--out FAYL.h264]
 
 Buyruq qatori sinov uchun:
@@ -48,7 +49,11 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // Argumentsiz: oynali interfeys. `connect ...`: buyruq qatori (sinov va diagnostika uchun).
     if args.is_empty() {
-        return gui::run();
+        return gui::run(false);
+    }
+    // Ubuntu avtostarti: oyna yig'ilgan holda ochiladi
+    if args == ["--autostart"] {
+        return gui::run(true);
     }
     attach_parent_console();
     tokio::runtime::Builder::new_multi_thread()

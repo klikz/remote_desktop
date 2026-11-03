@@ -112,6 +112,45 @@ pub fn autologin_enabled() -> bool {
     enable && who
 }
 
+fn autostart_file() -> Result<PathBuf, String> {
+    Ok(config_home()?.join("autostart/ms-remote.desktop"))
+}
+
+/// Ubuntu'ga kirilganda dastur (MS Remote) o'zi ochiladimi.
+pub fn app_autostart_enabled() -> bool {
+    autostart_file().map(|p| p.exists()).unwrap_or(false)
+}
+
+/// Kirishda dasturni ochishni yoqadi/o'chiradi (`~/.config/autostart`). Dastur oynasi yig'ilgan holda ochiladi
+/// (`--autostart`), "Server orqali" agenti esa sozlamaga ko'ra o'zi ulanadi.
+pub fn set_app_autostart(on: bool) -> Result<(), String> {
+    let path = autostart_file()?;
+    if !on {
+        return match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("avtostartni o'chirib bo'lmadi: {e}")),
+        };
+    }
+    let exe = std::env::current_exe().map_err(|e| format!("dastur yo'li aniqlanmadi: {e}"))?;
+    let exe = exe.to_string_lossy();
+    // .desktop `Exec` qiymatida bo'sh joy va maxsus belgilar qo'shtirnoq ichida, `\`, `"`, `` ` ``, `$` esa `\` bilan yoziladi
+    let mut quoted = String::from("\"");
+    for c in exe.chars() {
+        if matches!(c, '\\' | '"' | '`' | '$') {
+            quoted.push('\\');
+        }
+        quoted.push(c);
+    }
+    quoted.push('"');
+    let entry = format!(
+        "[Desktop Entry]\nType=Application\nName=MS Remote\nComment=Masofaviy ish stoli\nExec={quoted} --autostart\n\
+         Terminal=false\nX-GNOME-Autostart-enabled=true\nX-GNOME-Autostart-Delay=5\n"
+    );
+    fs::create_dir_all(path.parent().ok_or("yo'l noto'g'ri")?).map_err(|e| format!("papka yaratilmadi: {e}"))?;
+    fs::write(&path, entry).map_err(|e| format!("avtostart fayli yozilmadi: {e}"))
+}
+
 /// Host xizmatining oxirgi log qatorlari (xato sababini ko'rsatish uchun).
 pub fn journal_tail(n: usize) -> String {
     Command::new("journalctl")

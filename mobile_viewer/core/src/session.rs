@@ -2,14 +2,15 @@
 //! `crates/viewer/src/gui/session.rs` mantig'i, lekin egui/openh264 siz.
 
 use anyhow::Result;
-use protocol::InputEvent;
+use protocol::{InputEvent, DEFAULT_PORT};
 use rdcore::{
-    client::{connect_relayed, ConnectOptions},
+    client::{connect_relayed, connect_with, ConnectOptions, Transport},
     known_hosts::KnownHosts,
     paths,
     relay::agent::Connector,
 };
 use std::{
+    net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc::{self, TrySendError},
@@ -21,12 +22,16 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 #[derive(Clone)]
 pub struct Params {
+    /// Server (relay) orqali ulanishda qabul qiluvchi ID.
     pub id: String,
+    /// P2P (to'g'ridan-to'g'ri) ulanishda Host manzili: `IP`, `IP:port` yoki `nom[:port]`.
+    pub addr: String,
     pub password: String,
     pub fps: u16,
     pub kbps: u32,
     pub height: u16,
-    pub connector: Connector,
+    /// `Some` = server orqali, `None` = P2P (`addr`).
+    pub connector: Option<Connector>,
 }
 
 /// Kadr: kalit-kadr belgisi + Annex-B H.264 baytlari.
@@ -124,6 +129,21 @@ pub fn start(p: Params) -> Arc<Sess> {
     sess
 }
 
+async fn resolve(target: &str) -> Result<SocketAddr> {
+    let target = target.trim();
+    if let Ok(a) = target.parse::<SocketAddr>() {
+        return Ok(a);
+    }
+    if let Ok(ip) = target.parse::<IpAddr>() {
+        return Ok(SocketAddr::new(ip, DEFAULT_PORT));
+    }
+    let with_port = if target.contains(':') { target.to_string() } else { format!("{target}:{DEFAULT_PORT}") };
+    let mut addrs = tokio::net::lookup_host(with_port)
+        .await
+        .map_err(|e| anyhow::anyhow!("{target} manzilini aniqlab bo'lmadi: {e}"))?;
+    addrs.next().ok_or_else(|| anyhow::anyhow!("{target} uchun manzil topilmadi"))
+}
+
 async fn run(
     p: Params,
     stats: Arc<Stats>,
@@ -147,23 +167,37 @@ async fn run(
         rx.recv().unwrap_or(false)
     };
 
-    // Server qabul qiluvchidan ruxsat so'raydi (u 30 soniya o'ylaydi)
-    // Parol kiritilmagan bo'lsa: qarovsiz Host ham ruxsat oynasini ko'rsatadi (xato emas)
-    let relayed = p
-        .connector
-        .connect_ask(&p.id, p.password.is_empty())
-        .await
-        .map_err(|_| anyhow::anyhow!("relay agenti to'xtagan"))?
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let password = relayed.pw.clone().unwrap_or_else(|| p.password.clone());
-    if password.is_empty() {
-        anyhow::bail!("Host kalit bermadi: kalitni kiriting");
-    }
-    let mut session = connect_relayed(
-        ConnectOptions { addr: relayed.local, password: &password, known_hosts: &known_hosts, confirm_new_host: &confirm },
-        format!("id:{}", p.id),
-    )
-    .await?;
+    let mut session = match &p.connector {
+        Some(connector) => {
+            // Server qabul qiluvchidan ruxsat so'raydi (u 30 soniya o'ylaydi)
+            // Parol kiritilmagan bo'lsa: qarovsiz Host ham ruxsat oynasini ko'rsatadi (xato emas)
+            let relayed = connector
+                .connect_ask(&p.id, p.password.is_empty())
+                .await
+                .map_err(|_| anyhow::anyhow!("relay agenti to'xtagan"))?
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let password = relayed.pw.clone().unwrap_or_else(|| p.password.clone());
+            if password.is_empty() {
+                anyhow::bail!("Host kalit bermadi: kalitni kiriting");
+            }
+            connect_relayed(
+                ConnectOptions { addr: relayed.local, password: &password, known_hosts: &known_hosts, confirm_new_host: &confirm },
+                format!("id:{}", p.id),
+            )
+            .await?
+        }
+        None => {
+            if p.password.is_empty() {
+                anyhow::bail!("kalitni kiriting");
+            }
+            let addr = resolve(&p.addr).await?;
+            connect_with(
+                ConnectOptions { addr, password: &p.password, known_hosts: &known_hosts, confirm_new_host: &confirm },
+                Transport::Auto,
+            )
+            .await?
+        }
+    };
     let _ = ev_tx.send(Event::Connected { fingerprint: session.fingerprint.clone(), via_tcp: session.via_tcp });
 
     let mut stream = session.request_video(p.fps, p.kbps, p.height, 0).await?;

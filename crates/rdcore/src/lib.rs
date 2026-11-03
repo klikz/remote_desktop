@@ -15,6 +15,7 @@ pub mod auth;
 pub mod cert;
 pub mod client;
 pub mod framing;
+pub mod filexfer;
 pub mod fsutil;
 pub mod hexfmt;
 pub mod known_hosts;
