@@ -906,7 +906,7 @@ impl App {
         egui::SidePanel::right("files").exact_width(300.0).resizable(false).frame(theme::side_frame()).show(ctx, |ui| {
             ui.label(RichText::new("FAYLLAR").size(11.0).color(theme::DIM).strong());
             ui.add_space(2.0);
-            theme::hint(ui, "Fayl yuborish: uni shu oynaga sudrab tashlang. U Host'ning \"MS Remote\" papkasiga tushadi.");
+            theme::hint(ui, "Fayl yuborish: uni shu oynaga sudrab tashlang. U Host'ning \"downloads/MS Remote\" papkasiga tushadi.");
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 refresh = theme::button(ui, "Yangilash").clicked();

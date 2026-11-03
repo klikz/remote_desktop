@@ -63,6 +63,8 @@ class MainActivity : Activity() {
         height = settings.height
         build()
         if (!AgentManager.isStarted) AgentManager.start(settings)
+        // Ilova ochilganda bir marta (ekran aylantirilganda qayta chiqmaydi)
+        if (savedInstanceState == null) showWelcome()
     }
 
     override fun onResume() {
@@ -93,7 +95,7 @@ class MainActivity : Activity() {
 
         // --- ulanish kartasi
         idEdit = edit("9 xonali ID", settings.lastTarget, InputType.TYPE_CLASS_NUMBER)
-        addrEdit = edit("Host manzili (IP yoki nom, masalan 192.168.1.5:7777)", settings.lastAddr, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        addrEdit = edit("Host manzili (IP yoki nom[:port])", settings.lastAddr, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
         passEdit = edit("Kalit (agar kerak bo'lsa)", "", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         descLabel = label("", 12f, Colors.DIM)
         modeRelayBtn = button("Server orqali") { setMode(false) }
@@ -143,7 +145,6 @@ class MainActivity : Activity() {
             lp(top = 16),
         )
         syncQualityViews()
-        applyMode()
 
         // --- kontaktlar
         contactsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -152,6 +153,7 @@ class MainActivity : Activity() {
         p2pBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         p2pCard = card(label("Saqlangan kompyuterlar", 16f, bold = true), p2pBox)
         root.addView(p2pCard, lp(top = 12))
+        applyMode()
 
         // --- server sozlamalari
         serverEdit = edit("Server manzili (host yoki host:port)", settings.server, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
