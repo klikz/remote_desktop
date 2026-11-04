@@ -83,6 +83,8 @@ enum Cmd {
     Subscribe(Vec<String>),
     Reply { sid: String, accept: bool },
     Connect { target: String, ask: bool, tx: oneshot::Sender<Result<Relayed, String>> },
+    /// Tarmoq o'zgardi (Wi-Fi <-> mobil): server bilan ulanish eskirgan, darrov yangisi ochiladi.
+    NetworkChanged,
 }
 
 pub struct Agent {
@@ -116,6 +118,11 @@ impl Agent {
     /// Onlayn holatini kuzatiladigan ID'lar ro'yxati (almashtiriladi).
     pub fn subscribe(&self, ids: Vec<String>) {
         let _ = self.cmd.send(Cmd::Subscribe(ids));
+    }
+
+    /// Qurilma tarmog'i o'zgardi: server bilan ulanish darrov qayta o'rnatiladi (kutish va idle timeout'siz).
+    pub fn network_changed(&self) {
+        let _ = self.cmd.send(Cmd::NetworkChanged);
     }
 
     /// Kiruvchi so'rovga javob (dialog natijasi).
@@ -189,6 +196,10 @@ async fn run(
                     }
                     Some(Cmd::Subscribe(v)) => subs = v,
                     Some(Cmd::Reply { .. }) => {}
+                    Some(Cmd::NetworkChanged) => {
+                        backoff = 1; // pastda ikkilanadi: 2 s
+                        break;
+                    }
                 },
             }
         }
@@ -334,6 +345,7 @@ async fn session(
                     connects.insert(req.clone(), tx);
                     write_msg(&mut send, &RMsg::Connect { target, req, ask }).await?;
                 }
+                Some(Cmd::NetworkChanged) => break Exit::Disconnected,
             },
             _ = conn.closed() => break Exit::Disconnected,
         }

@@ -56,6 +56,18 @@ impl std::fmt::Display for Unreachable {
 
 impl std::error::Error for Unreachable {}
 
+/// Host ulanishni doimiy rad etdi (kalit noto'g'ri, fingerprint o'zgargan, tasdiqlanmagan): qayta urinish foyda bermaydi.
+#[derive(Debug)]
+pub struct Rejected(pub String);
+
+impl std::fmt::Display for Rejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Rejected {}
+
 pub struct Session {
     /// Ulanish TCP tunnel orqali o'rnatilganmi.
     pub via_tcp: bool,
@@ -150,14 +162,15 @@ async fn connect_keyed(opts: ConnectOptions<'_>, key: Option<String>, handshake_
         Trust::Known => {}
         Trust::Unknown => {
             if !(opts.confirm_new_host)(&fp) {
-                bail!("Host fingerprint'i tasdiqlanmadi, ulanish bekor qilindi");
+                return Err(Rejected("Host fingerprint'i tasdiqlanmadi, ulanish bekor qilindi".into()).into());
             }
             opts.known_hosts.add(&key, &fp)?;
         }
         Trust::Changed { expected } => {
-            bail!(
+            return Err(Rejected(format!(
                 "DIQQAT: {key} uchun Host fingerprint'i o'zgargan!\n  saqlangan: {expected}\n  hozirgi:   {fp}\nBu vositachi hujumi (MITM) belgisi bo'lishi mumkin. Host sertifikatini o'zingiz almashtirgan bo'lsangiz, known_hosts faylidan shu qatorni o'chiring."
-            );
+            ))
+            .into());
         }
     }
 
@@ -169,7 +182,9 @@ async fn connect_keyed(opts: ConnectOptions<'_>, key: Option<String>, handshake_
         .context("Host javob bermadi (vaqt tugadi)")??
     {
         Message::ServerHello { salt, nonce, .. } => (salt, nonce),
-        Message::AuthResult { ok: false, reason: r } => bail!("Host rad etdi: {}", reason::describe(r)),
+        Message::AuthResult { ok: false, reason: r } => {
+            return Err(Rejected(format!("Host rad etdi: {}", reason::describe(r))).into())
+        }
         other => bail!("kutilmagan xabar: {other:?}"),
     };
 
@@ -182,7 +197,9 @@ async fn connect_keyed(opts: ConnectOptions<'_>, key: Option<String>, handshake_
         .context("autentifikatsiya natijasi kelmadi (vaqt tugadi)")??
     {
         Message::AuthResult { ok: true, .. } => {}
-        Message::AuthResult { ok: false, reason: r } => bail!("autentifikatsiya rad etildi: {}", reason::describe(r)),
+        Message::AuthResult { ok: false, reason: r } => {
+            return Err(Rejected(format!("autentifikatsiya rad etildi: {}", reason::describe(r))).into())
+        }
         other => bail!("kutilmagan xabar: {other:?}"),
     }
 
@@ -262,6 +279,12 @@ impl Session {
         self.conn.clone()
     }
 
+    /// Host ulanishni ataylab yopdimi (`Uzish`, Host to'xtadi): qayta ulanish foyda bermaydi.
+    /// Tarmoq uzilishi/timeout (`TimedOut`, `Reset` ...) bunga kirmaydi.
+    pub fn closed_by_peer(&self) -> bool {
+        matches!(self.conn.close_reason(), Some(quinn::ConnectionError::ApplicationClosed(_)))
+    }
+
     /// Host'dan saqlangan ekran ruxsatini bekor qilib, qaytadan so'rashni talab qiladi.
     pub async fn reset_permissions(&mut self) -> Result<()> {
         write_message(&mut self.send, &Message::ResetPermissions).await?;
@@ -295,11 +318,17 @@ impl Session {
 
     /// Ping yuboradi va aylanish vaqtini (RTT) qaytaradi.
     pub async fn ping(&mut self) -> Result<Duration> {
+        self.ping_within(STEP_TIMEOUT).await
+    }
+
+    /// `ping`, lekin Pong uchun `wait` gacha kutadi (mobil tarmoqda qisqa uzilishlarga chidamli).
+    /// Vaqt tugasa oqim buzilgan hisoblanadi: sessiyani tugatish kerak.
+    pub async fn ping_within(&mut self, wait: Duration) -> Result<Duration> {
         let id = self.next_ping;
         self.next_ping += 1;
         let start = Instant::now();
         write_message(&mut self.send, &Message::Ping { id, sent_ms: now_ms() }).await?;
-        match timeout(STEP_TIMEOUT, read_message(&mut self.recv))
+        match timeout(wait, read_message(&mut self.recv))
             .await
             .context("Pong kelmadi (vaqt tugadi)")??
         {

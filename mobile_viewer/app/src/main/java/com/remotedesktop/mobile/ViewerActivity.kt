@@ -137,6 +137,11 @@ class ViewerActivity : Activity(), KeySink {
         targetId = intent.getStringExtra("id").orEmpty()
         p2pAddr = intent.getStringExtra("addr").orEmpty()
         buildUi()
+        // Fonda ham ulanish uzilmasligi uchun foreground service (+ CPU/Wi-Fi qulflari, tarmoq kuzatuvi)
+        SessionService.start(this)
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
         val password = intent.getStringExtra("password").orEmpty()
         val fps = intent.getIntExtra("fps", 30)
         val kbps = intent.getIntExtra("kbps", 8000)
@@ -263,7 +268,17 @@ class ViewerActivity : Activity(), KeySink {
             "video" -> {
                 videoStarted = true
                 overlay.visibility = View.GONE
+                overlay.setBackgroundColor(0)
                 maybeStartDecoder()
+            }
+            "reconnecting" -> {
+                // Aloqa uzildi: sessiya tugamaydi, Rust yadro o'zi qayta ulanadi. Dekoder oxirgi kadrni ushlab turadi.
+                val attempt = f.getOrElse(1) { "1" }
+                val reason = f.getOrElse(2) { "" }
+                overlay.visibility = View.VISIBLE
+                overlay.setBackgroundColor(0xAA000000.toInt())
+                overlay.setTextColor(Colors.TEXT)
+                overlay.text = "Aloqa uzildi. Qayta ulanilmoqda… ($attempt)\n\n$reason\n\nHost ruxsat so'rashi mumkin."
             }
             "ended" -> {
                 val err = f.getOrElse(1) { "" }
@@ -273,6 +288,7 @@ class ViewerActivity : Activity(), KeySink {
                     finish()
                 } else {
                     overlay.visibility = View.VISIBLE
+                    overlay.setBackgroundColor(0xAA000000.toInt())
                     overlay.text = "Ulanish tugadi:\n$err"
                     overlay.setTextColor(Colors.BAD)
                 }
@@ -358,16 +374,29 @@ class ViewerActivity : Activity(), KeySink {
 
     // --- hayot sikli ----------------------------------------------------------------------------
 
+    /** Ilova fonda uzoq turib qolsa (ekran o'chiq, boshqa ilova) sessiya yopiladi: Host'da behuda video oqmasin. */
+    private val closeInBackground = Runnable { finish() }
+
+    override fun onStart() {
+        super.onStart()
+        handler.removeCallbacks(closeInBackground)
+    }
+
     override fun onStop() {
         super.onStop()
-        // v1: fon rejimida sessiya yo'q — ekran yopilsa ulanish tugatiladi
-        if (!isChangingConfigurations) finish()
+        // Sessiya fonda ham yashaydi (SessionService); dekoder surfaceDestroyed'da to'xtaydi, qaytganda kalit-kadrdan davom etadi.
+        if (!isChangingConfigurations) handler.postDelayed(closeInBackground, BACKGROUND_GRACE_MS)
     }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         stopDecoder()
         Native.close()
+        SessionService.stop(this)
         super.onDestroy()
+    }
+
+    private companion object {
+        const val BACKGROUND_GRACE_MS = 5 * 60 * 1000L
     }
 }

@@ -89,6 +89,8 @@ async fn wrong_password_is_rejected() {
     .await;
     let err = res.err().expect("noto'g'ri kalit rad etilishi kerak");
     assert!(format!("{err:#}").contains("noto'g'ri kalit"), "xato matni: {err:#}");
+    // Mobil klient shu belgi bo'yicha qayta ulanishni to'xtatadi (kalit noto'g'ri bo'lsa urinish befoyda)
+    assert!(err.downcast_ref::<rdcore::client::Rejected>().is_some(), "Rejected kutilgan edi: {err:#}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

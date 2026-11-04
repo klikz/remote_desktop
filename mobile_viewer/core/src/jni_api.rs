@@ -156,13 +156,26 @@ pub extern "system" fn Java_com_remotedesktop_mobile_Native_connectDirect(
     })
 }
 
-/// Sessiya hodisasi: `confirm\tfp`, `connected\tfp\t0|1`, `video`, `ended\terror`; yo'q bo'lsa null.
+/// Qurilma tarmog'i o'zgardi (Wi-Fi <-> mobil internet va h.k.): agent va ochiq sessiya darrov qayta ulanadi.
+#[no_mangle]
+pub extern "system" fn Java_com_remotedesktop_mobile_Native_networkChanged(_env: JNIEnv, _o: JObject) {
+    if let Some(a) = lock(&AGENT).as_ref() {
+        a.network_changed();
+    }
+    if let Some(c) = current() {
+        c.network_changed();
+    }
+}
+
+/// Sessiya hodisasi: `confirm\tfp`, `connected\tfp\t0|1`, `video`, `reconnecting\tattempt\treason`, `ended\terror`;
+/// yo'q bo'lsa null.
 #[no_mangle]
 pub extern "system" fn Java_com_remotedesktop_mobile_Native_pollEvent(mut env: JNIEnv, _o: JObject) -> jstring {
     let text = match current().and_then(|c| c.poll_event()) {
         Some(Event::Confirm(fp)) => format!("confirm\t{fp}"),
         Some(Event::Connected { fingerprint, via_tcp }) => format!("connected\t{fingerprint}\t{}", via_tcp as u8),
         Some(Event::VideoStarted) => "video".to_string(),
+        Some(Event::Reconnecting { attempt, reason }) => format!("reconnecting\t{attempt}\t{}", reason.replace('\t', " ")),
         Some(Event::Ended(e)) => format!("ended\t{}", e.unwrap_or_default()),
         None => return std::ptr::null_mut(),
     };
