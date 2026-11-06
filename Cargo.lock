@@ -2998,9 +2998,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ashpd",
+ "futures-util",
  "gstreamer",
  "gstreamer-app",
  "tokio",
+ "zbus",
 ]
 
 [[package]]

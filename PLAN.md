@@ -222,8 +222,13 @@ Holat: GNOME (Wayland) portal orqali ekran olish va kiritishni ekran qulflangand
 ataylab shunday), qulf paytidagi urinish saqlangan ruxsat tokenini ham buzishi mumkin. Shu sabab hozir qulf o'chiriladi.
 - [ ] GNOME "Remote Login" (gnome-remote-desktop, tizim darajasidagi RDP, GDM orqali): qulf va login ekranida ishlaydi,
       lekin RDP protokoli va alohida sessiya: bizning Viewer bilan to'g'ridan-to'g'ri mos emas, baholash
-- [ ] Mutter'ning ichki D-Bus API'si (`org.gnome.Mutter.RemoteDesktop/ScreenCast`) ni to'g'ridan-to'g'ri ishlatish:
-      rasmiy emas, GNOME versiyalari orasida o'zgarishi mumkin, qulfda ishlashi tekshirilishi kerak
+- [~] Mutter'ning ichki D-Bus API'si (`org.gnome.Mutter.RemoteDesktop/ScreenCast`) ni to'g'ridan-to'g'ri ishlatish:
+      rasmiy emas, GNOME versiyalari orasida o'zgarishi mumkin, qulfda ishlashi tekshirilishi kerak.
+      Probe yozildi (`crates/portal-probe/src/bin/mutter_probe.rs`, Linux target uchun `cargo check` o'tdi, Ubuntu'da
+      hali ishga tushirilmagan). Sinash: `cargo run -p portal-probe --bin mutter_probe -- --watch 40 --lock-after 10 --frames /tmp/mp`
+      (GNOME Wayland sessiyasi ichida; `gstreamer1.0-tools`, `gstreamer1.0-pipewire` kerak). Natija (24.04 va 26.04)
+      shu yerga yoziladi: kiritish xatosi qaysi soniyadan boshlandi, `Closed` signali keldimi, /tmp/mp kadrlari
+      qulfdan keyin ham yozildimi. Ishlasa: `host-linux` ga `mutter.rs` backend (rejaga qarang), ishlamasa kengaytma varianti.
 - [ ] Uchinchi tomon GNOME kengaytmasi "Allow Locked Remote Desktop" ni 24.04 va 26.04 da sinash
 - [ ] Natijaga qarab: UI'da tanlov "Qulfni o'chirish (tavsiya)" yoki "Qulf bilan ishlash (tajribaviy)"
 
