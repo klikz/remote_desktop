@@ -2,6 +2,8 @@
 //! Kiritishni (sichqoncha/klaviatura) bajarish keyingi bosqichda qo'shiladi.
 
 #[cfg(target_os = "linux")]
+mod backend;
+#[cfg(target_os = "linux")]
 mod capture;
 #[cfg(target_os = "linux")]
 mod linux;

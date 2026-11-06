@@ -222,6 +222,8 @@ Holat: GNOME (Wayland) portal orqali ekran olish va kiritishni ekran qulflangand
 ataylab shunday), qulf paytidagi urinish saqlangan ruxsat tokenini ham buzishi mumkin. Shu sabab hozir qulf o'chiriladi.
 - [ ] GNOME "Remote Login" (gnome-remote-desktop, tizim darajasidagi RDP, GDM orqali): qulf va login ekranida ishlaydi,
       lekin RDP protokoli va alohida sessiya: bizning Viewer bilan to'g'ridan-to'g'ri mos emas, baholash
+- [x] SINOV NATIJASI (Ubuntu 26.04, GNOME 50.1): kengaytmasiz Mutter sessiyasi qulfda YOPILADI (`Closed`). "Allow Locked Remote Desktop" (GitHub main, `allowlockedremotedesktop@kamens.us`, `inhibit_remote_access` ni o'chiradi) bilan probe qulfda ishladi.
+- [~] Host'da Mutter backend: `crates/mutter-ctl` + `host-linux/src/backend.rs` (RD_BACKEND=portal|mutter|auto yoki `backend` fayli); faqat asosiy monitor; `scripts/ubuntu-host-setup.sh --keep-lock` qulfni yoqiq qoldirib backend'ni mutter qiladi. Ubuntu'da build va sinov kutilmoqda.
 - [~] Mutter'ning ichki D-Bus API'si (`org.gnome.Mutter.RemoteDesktop/ScreenCast`) ni to'g'ridan-to'g'ri ishlatish:
       rasmiy emas, GNOME versiyalari orasida o'zgarishi mumkin, qulfda ishlashi tekshirilishi kerak.
       Probe yozildi (`crates/portal-probe/src/bin/mutter_probe.rs`, Linux target uchun `cargo check` o'tdi, Ubuntu'da

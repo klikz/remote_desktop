@@ -4,6 +4,7 @@ members = [
     "crates/protocol",
     "crates/rdcore",
     "crates/host-linux",
+    "crates/mutter-ctl",
     "crates/viewer",
     "crates/host-windows",
     "crates/portal-probe",

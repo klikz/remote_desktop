@@ -14,6 +14,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net",
 # Faqat Linux'da: ekran olish (portal) va kodlash (GStreamer).
 # Ubuntu'da dev paketlar kerak, README ga qarang.
 [target.'cfg(target_os = "linux")'.dependencies]
+mutter-ctl = { path = "../mutter-ctl" }
 ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
 gstreamer = "0.23"
 gstreamer-app = "0.23"

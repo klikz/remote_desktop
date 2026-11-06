@@ -1843,6 +1843,7 @@ dependencies = [
  "ashpd",
  "gstreamer",
  "gstreamer-app",
+ "mutter-ctl",
  "protocol",
  "rdcore",
  "rpassword",
@@ -2331,6 +2332,17 @@ name = "muldiv"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "956787520e75e9bd233246045d19f42fb73242759cc57fba9611d940ae96d4b0"
+
+[[package]]
+name = "mutter-ctl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "protocol",
+ "tokio",
+ "zbus",
+]
 
 [[package]]
 name = "naga"

@@ -17,7 +17,7 @@ use std::{
 };
 use tokio::task::JoinHandle;
 
-use crate::{capture, portal::PortalHandle};
+use crate::{backend::Backend, capture};
 
 const USAGE: &str = "\
 host-linux: Remote Desktop Host
@@ -81,7 +81,7 @@ async fn run_host(args: &[String]) -> Result<()> {
         monitors: vec![], // keyingi bosqichda to'ldiriladi
     };
 
-    let portal = PortalHandle::spawn(dir.join("portal.token"));
+    let portal = Backend::select(&dir).await;
     let host = Host::bind(SocketAddr::new(ip, port), &identity, creds, caps)?;
     let _tcp = host.spawn_tcp_tunnel();
     println!("Host ishga tushdi: {} (UDP)", host.local_addr()?);
@@ -96,7 +96,7 @@ async fn run_host(args: &[String]) -> Result<()> {
 }
 
 /// Bitta Viewer sessiyasi: control xabarlari va video.
-async fn session(mut io: SessionIo, portal: PortalHandle) {
+async fn session(mut io: SessionIo, portal: Backend) {
     let mut video: Option<JoinHandle<()>> = None;
     let files = rdcore::filexfer::spawn_server(io.conn.clone());
     loop {
@@ -140,7 +140,7 @@ async fn session(mut io: SessionIo, portal: PortalHandle) {
 
 async fn start_video(
     io: &SessionIo,
-    portal: &PortalHandle,
+    portal: &Backend,
     fps: u16,
     kbps: u32,
     max_height: u16,

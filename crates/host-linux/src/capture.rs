@@ -31,7 +31,7 @@ pub struct Capture {
     /// PipeWire bergan haqiqiy kadr o'lchami (piksel). Caps kelishilgach to'ladi.
     pub source_size: Arc<Mutex<Option<(i32, i32)>>>,
     stop: Arc<AtomicBool>,
-    _fd: OwnedFd,
+    _fd: Option<OwnedFd>,
 }
 
 impl Drop for Capture {
@@ -80,7 +80,8 @@ fn encoder_base(factory: &str, kbps: u32, gop: u32) -> String {
     }
 }
 
-pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32, max_height: u32, src_size: (i32, i32)) -> Result<Capture, CaptureError> {
+/// `fd`: portal bergan PipeWire ulanishi. Mutter backend'ida `None` (odatiy PipeWire ulanishi ishlatiladi).
+pub fn start(fd: Option<OwnedFd>, node_id: u32, fps: u32, kbps: u32, max_height: u32, src_size: (i32, i32)) -> Result<Capture, CaptureError> {
     gst::init()
         .context("GStreamer ishga tushmadi")
         .map_err(|e| fail(video_reason::NO_CAPTURE, e))?;
@@ -119,12 +120,13 @@ pub fn start(fd: OwnedFd, node_id: u32, fps: u32, kbps: u32, max_height: u32, sr
     } else {
         String::new()
     };
+    let fd_prop = fd.as_ref().map_or(String::new(), |f| format!("fd={} ", f.as_raw_fd()));
     let build = |enc: &str| {
         format!(
-            "pipewiresrc name=src fd={} path={} do-timestamp=true ! videoconvert ! videoscale ! videorate ! \
+            "pipewiresrc name=src {}path={} do-timestamp=true ! videoconvert ! videoscale ! videorate ! \
              video/x-raw,framerate={}/1{} ! {} ! video/x-h264,stream-format=byte-stream,alignment=au ! \
              appsink name=sink sync=false max-buffers=4 drop=true",
-            fd.as_raw_fd(),
+            fd_prop,
             node_id,
             fps,
             height_caps,

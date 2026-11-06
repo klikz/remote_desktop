@@ -16,7 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 
 pub struct StreamInfo {
     /// PipeWire ulanishi (fd). Egalikni kodlagich oladi.
-    pub fd: OwnedFd,
+    pub fd: Option<OwnedFd>,
     pub node_id: u32,
     /// Tanlangan monitor tartib raqami, monitorlar soni va tanlangan monitor o'lchami.
     pub index: usize,
@@ -353,7 +353,7 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
                 Ok(fd) => {
                     fresh = false;
                     let _ = reply.send(Ok(StreamInfo {
-                        fd,
+                        fd: Some(fd),
                         node_id: m.node_id,
                         index,
                         count: mons.len(),
