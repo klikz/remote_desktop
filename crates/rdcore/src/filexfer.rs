@@ -38,6 +38,8 @@ pub const MAX_FILE_LEN: u64 = 16 << 30;
 const MAX_NAME_LEN: usize = 255;
 const MAX_LIST: usize = 1000;
 const CHUNK: usize = 64 * 1024;
+/// Fayl oqimlari ustuvorligi: video (Host'da 10) va kiritishdan past, katta fayl ekran/boshqaruvni bosmasin.
+const PRIORITY: i32 = -10;
 /// Oqim ichida keyingi baytni kutish muddati (tarmoq uzilsa osilib qolmaslik uchun).
 const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -204,6 +206,7 @@ async fn finish(mut send: SendStream) {
 pub fn spawn_server(conn: Connection) -> JoinHandle<()> {
     tokio::spawn(async move {
         while let Ok((send, recv)) = conn.accept_bi().await {
+            let _ = send.set_priority(PRIORITY);
             tokio::spawn(async move {
                 if let Err(e) = handle(send, recv).await {
                     eprintln!("[host] fayl almashinuvi: {e:#}");
@@ -406,6 +409,7 @@ pub async fn upload(conn: &Connection, path: &Path, progress: &mut (dyn FnMut(u6
     let mut file = File::open(path).await.with_context(|| format!("{} ochilmadi", path.display()))?;
 
     let (mut send, mut recv) = conn.open_bi().await.context("oqim ochib bo'lmadi")?;
+    let _ = send.set_priority(PRIORITY);
     let mut head = vec![OP_PUT];
     head.extend_from_slice(&(name.len() as u16).to_be_bytes());
     head.extend_from_slice(name.as_bytes());

@@ -7,7 +7,8 @@
 use std::fmt;
 
 /// Protokol versiyasi. Mos kelmasa, ulanish handshake'da rad etiladi.
-pub const PROTOCOL_VERSION: u16 = 1;
+/// 2: `RequestKeyframe` va `Feedback` (Host kalit kadrni faqat so'ralganda yuboradi, kechikishni Viewer javobiga qarab cheklaydi).
+pub const PROTOCOL_VERSION: u16 = 2;
 /// Host tinglaydigan standart port (UDP).
 pub const DEFAULT_PORT: u16 = 7777;
 /// QUIC ALPN identifikatori.
@@ -171,6 +172,11 @@ pub enum Message {
     Input(InputEvent),
     /// Viewer -> Host: saqlangan ekran/boshqarish ruxsatini bekor qilib, qaytadan so'raydi (Linux Host).
     ResetPermissions,
+    /// Viewer -> Host: kalit kadr (IDR) kerak (dekodlash xatosi yoki kadr tashlandi). Host keyingi kadrni IDR qiladi.
+    RequestKeyframe,
+    /// Viewer -> Host: oxirgi qabul qilingan kadr `pts_us` va dekoder navbatidagi kadrlar soni.
+    /// Host shu bo'yicha "yo'ldagi" kadrlarni hisoblab, kechikish oshsa kodlashni vaqtincha to'xtatadi.
+    Feedback { last_pts_us: u64, queue: u8 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -212,6 +218,8 @@ const TAG_VIDEO_STARTED: u8 = 10;
 const TAG_VIDEO_FAILED: u8 = 11;
 const TAG_INPUT: u8 = 12;
 const TAG_RESET_PERMISSIONS: u8 = 13;
+const TAG_REQUEST_KEYFRAME: u8 = 14;
+const TAG_FEEDBACK: u8 = 15;
 
 struct Reader<'a> {
     buf: &'a [u8],
@@ -347,6 +355,12 @@ impl Message {
                 out.push(*reason);
             }
             Message::ResetPermissions => out.push(TAG_RESET_PERMISSIONS),
+            Message::RequestKeyframe => out.push(TAG_REQUEST_KEYFRAME),
+            Message::Feedback { last_pts_us, queue } => {
+                out.push(TAG_FEEDBACK);
+                out.extend_from_slice(&last_pts_us.to_be_bytes());
+                out.push(*queue);
+            }
             Message::Input(ev) => {
                 out.push(TAG_INPUT);
                 match ev {
@@ -435,6 +449,8 @@ impl Message {
             },
             TAG_VIDEO_FAILED => Message::VideoFailed { reason: r.u8()? },
             TAG_RESET_PERMISSIONS => Message::ResetPermissions,
+            TAG_REQUEST_KEYFRAME => Message::RequestKeyframe,
+            TAG_FEEDBACK => Message::Feedback { last_pts_us: r.u64()?, queue: r.u8()? },
             TAG_INPUT => Message::Input(match r.u8()? {
                 1 => InputEvent::PointerMove { x: r.u16()?, y: r.u16()? },
                 2 => InputEvent::Button { button: r.u8()?, pressed: r.u8()? != 0 },
@@ -515,6 +531,9 @@ mod tests {
             Message::Input(InputEvent::Scroll { dx: -3, dy: 7 }),
             Message::Input(InputEvent::Key { code: 30, pressed: false }),
             Message::ResetPermissions,
+            Message::RequestKeyframe,
+            Message::Feedback { last_pts_us: 1_234_567, queue: 3 },
+            Message::Feedback { last_pts_us: u64::MAX, queue: 255 },
         ]
     }
 

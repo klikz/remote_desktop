@@ -8,12 +8,15 @@ use rdcore::{
     auth::Credentials,
     cert::HostIdentity,
     framing::{read_message, write_message},
-    hexfmt, paths,
+    hexfmt,
+    pacing::VideoControl,
+    paths,
     server::{Handler, Host, SessionIo},
 };
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
+    time::Duration,
 };
 use tokio::task::JoinHandle;
 
@@ -98,6 +101,8 @@ async fn run_host(args: &[String]) -> Result<()> {
 /// Bitta Viewer sessiyasi: control xabarlari va video.
 async fn session(mut io: SessionIo, portal: Backend) {
     let mut video: Option<JoinHandle<()>> = None;
+    // Joriy video oqimining boshqaruvi (kalit kadr so'rovi, Viewer javobi)
+    let mut ctl: Option<Arc<VideoControl>> = None;
     let files = rdcore::filexfer::spawn_server(io.conn.clone());
     loop {
         match read_message(&mut io.recv).await {
@@ -111,8 +116,9 @@ async fn session(mut io: SessionIo, portal: Backend) {
                     Message::VideoFailed { reason: video_reason::BUSY }
                 } else {
                     match start_video(&io, &portal, fps, kbps, max_height, monitor).await {
-                        Ok((handle, fps, kbps)) => {
+                        Ok((handle, fps, kbps, c)) => {
                             video = Some(handle);
+                            ctl = Some(c);
                             Message::VideoStarted { codec: CODEC_H264, fps, kbps }
                         }
                         Err(reason) => Message::VideoFailed { reason },
@@ -123,6 +129,16 @@ async fn session(mut io: SessionIo, portal: Backend) {
                 }
             }
             Ok(Message::Input(ev)) => portal.input(ev).await,
+            Ok(Message::RequestKeyframe) => {
+                if let Some(c) = &ctl {
+                    c.request_keyframe();
+                }
+            }
+            Ok(Message::Feedback { last_pts_us, queue }) => {
+                if let Some(c) = &ctl {
+                    c.on_feedback(last_pts_us, queue);
+                }
+            }
             Ok(Message::ResetPermissions) => {
                 println!("[host] Viewer ruxsatni qayta berishni so'radi");
                 portal.reset().await;
@@ -145,7 +161,7 @@ async fn start_video(
     kbps: u32,
     max_height: u16,
     monitor: u8,
-) -> Result<(JoinHandle<()>, u16, u32), u8> {
+) -> Result<(JoinHandle<()>, u16, u32, Arc<VideoControl>), u8> {
     let fps = fps.clamp(5, 60);
     let kbps = kbps.clamp(500, 50_000);
     let info = portal.open_stream(monitor as usize).await.map_err(|e| {
@@ -153,7 +169,8 @@ async fn start_video(
         video_reason::NO_CAPTURE
     })?;
     let (index, count, width, height) = (info.index, info.count, info.width, info.height);
-    let cap = capture::start(info.fd, info.node_id, fps as u32, kbps, max_height as u32, (width, height)).map_err(|e| {
+    let ctl = Arc::new(VideoControl::new(u32::from(fps)));
+    let cap = capture::start(info.fd, info.node_id, fps as u32, kbps, max_height as u32, (width, height), ctl.clone()).map_err(|e| {
         eprintln!("[host] kodlashni boshlab bo'lmadi: {:#}", e.error);
         e.reason
     })?;
@@ -185,10 +202,10 @@ async fn start_video(
         });
     }
     let conn = io.conn.clone();
-    Ok((tokio::spawn(video_sender(conn, cap)), fps, kbps))
+    Ok((tokio::spawn(video_sender(conn, cap, ctl.clone())), fps, kbps, ctl))
 }
 
-async fn video_sender(conn: rdcore::quinn::Connection, mut cap: capture::Capture) {
+async fn video_sender(conn: rdcore::quinn::Connection, mut cap: capture::Capture, ctl: Arc<VideoControl>) {
     let mut stream = match conn.open_uni().await {
         Ok(s) => s,
         Err(e) => {
@@ -196,9 +213,21 @@ async fn video_sender(conn: rdcore::quinn::Connection, mut cap: capture::Capture
             return;
         }
     };
+    // Video fayl uzatishdan ustun: katta fayl yuklanayotganda ham ekran qotmaydi.
+    let _ = stream.set_priority(10);
     let mut sent: u64 = 0;
+    let mut keyframes: u64 = 0;
+    // Kalit kadr so'rovi va RTT shu taktda tekshiriladi.
+    let mut tick = tokio::time::interval(Duration::from_millis(20));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
+            _ = tick.tick() => {
+                ctl.set_rtt(conn.rtt());
+                if ctl.take_keyframe_request() {
+                    cap.force_keyframe();
+                }
+            }
             frame = cap.frames.recv() => {
                 let Some(f) = frame else { break };
                 let header = VideoHeader {
@@ -210,7 +239,9 @@ async fn video_sender(conn: rdcore::quinn::Connection, mut cap: capture::Capture
                 if stream.write_all(&header).await.is_err() || stream.write_all(&f.data).await.is_err() {
                     break; // Viewer uzildi
                 }
+                ctl.on_sent(f.pts_us);
                 sent += 1;
+                keyframes += u64::from(f.keyframe);
             }
             err = cap.errors.recv() => {
                 if let Some(m) = err {
@@ -221,5 +252,5 @@ async fn video_sender(conn: rdcore::quinn::Connection, mut cap: capture::Capture
         }
     }
     let _ = stream.finish();
-    println!("[host] video to'xtadi ({sent} kadr yuborildi)");
+    println!("[host] video to'xtadi ({sent} kadr yuborildi, {keyframes} kalit kadr)");
 }

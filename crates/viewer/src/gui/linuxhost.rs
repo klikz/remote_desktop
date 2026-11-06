@@ -116,6 +116,11 @@ fn autostart_file() -> Result<PathBuf, String> {
     Ok(config_home()?.join("autostart/ms-remote.desktop"))
 }
 
+/// Host xizmati fayli (systemd user unit) o'rnatilganmi.
+pub fn unit_installed() -> bool {
+    config_home().map(|d| d.join("systemd/user/remote-desktop-host.service").exists()).unwrap_or(false)
+}
+
 /// Ubuntu'ga kirilganda dastur (MS Remote) o'zi ochiladimi.
 pub fn app_autostart_enabled() -> bool {
     autostart_file().map(|p| p.exists()).unwrap_or(false)

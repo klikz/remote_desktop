@@ -128,7 +128,7 @@ impl RelayServer {
         creds: Option<Credentials>,
         registry_path: Option<PathBuf>,
     ) -> Result<Self> {
-        let cfg = tls::server_config_alpn(identity, ALPN, MAX_BIDI)?;
+        let cfg = tls::server_config_alpn(identity, ALPN, MAX_BIDI, tls::Timing::RELAY)?;
         let endpoint = quinn::Endpoint::server(cfg, bind).with_context(|| format!("{bind} manzilini tinglab bo'lmadi"))?;
         Ok(RelayServer {
             endpoint,

@@ -19,7 +19,7 @@ extern "system" {
 }
 
 /// Yashirin oyna `update` chaqirmaydi, shuning uchun oynani to'g'ridan-to'g'ri Win32 orqali ochamiz.
-fn show_window() {
+pub fn show_window() {
     let title: Vec<u16> = "MS Remote\0".encode_utf16().collect();
     unsafe {
         let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());

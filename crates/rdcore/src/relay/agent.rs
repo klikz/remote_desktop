@@ -62,13 +62,38 @@ pub struct Policy {
     pub ensure_host: Option<EnsureHost>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AgentEvent {
     Status { online: bool, text: String },
     Registered { id: String, token: String },
     Presence { id: String, online: bool, name: String },
     /// Dialog kerak: `Agent::reply` bilan javob beriladi.
     Incoming { sid: String, from: String, name: String },
+}
+
+/// Hodisa yuborilganda chaqiriladi (UI'ni uyg'otish uchun: davriy so'rash o'rniga).
+pub type Waker = Arc<dyn Fn(&AgentEvent) + Send + Sync>;
+
+/// Hodisalar kanali: har yuborishda uyg'otuvchi (o'rnatilgan bo'lsa) chaqiriladi.
+#[derive(Clone)]
+struct EvTx {
+    tx: std_mpsc::Sender<AgentEvent>,
+    wake: Arc<Mutex<Option<Waker>>>,
+}
+
+impl EvTx {
+    fn send(&self, e: AgentEvent) -> Result<(), std_mpsc::SendError<AgentEvent>> {
+        let w = self.wake.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        match w {
+            // Avval navbatga, keyin uyg'otish: UI uyg'onganda hodisa allaqachon kanalda bo'ladi.
+            Some(w) => {
+                let r = self.tx.send(e.clone());
+                w(&e);
+                r
+            }
+            None => self.tx.send(e),
+        }
+    }
 }
 
 /// Ochilgan ma'lumot kanali: `local` ga (UDP) oddiy Host manzili sifatida ulaniladi.
@@ -90,6 +115,7 @@ enum Cmd {
 pub struct Agent {
     cmd: mpsc::UnboundedSender<Cmd>,
     events: std_mpsc::Receiver<AgentEvent>,
+    wake: Arc<Mutex<Option<Waker>>>,
     pub policy: Arc<Mutex<Policy>>,
 }
 
@@ -97,7 +123,9 @@ impl Agent {
     /// Agentni ishga tushiradi. `Agent` tushirilganda to'xtaydi.
     pub fn start(cfg: AgentConfig, policy: Policy) -> Agent {
         let (cmd, cmd_rx) = mpsc::unbounded_channel();
-        let (ev_tx, events) = std_mpsc::channel();
+        let (tx, events) = std_mpsc::channel();
+        let wake: Arc<Mutex<Option<Waker>>> = Arc::new(Mutex::new(None));
+        let ev_tx = EvTx { tx, wake: wake.clone() };
         let policy = Arc::new(Mutex::new(policy));
         let p = policy.clone();
         std::thread::spawn(move || {
@@ -108,7 +136,14 @@ impl Agent {
             rt.block_on(run(cfg, p, cmd_rx, ev_tx));
             rt.shutdown_timeout(Duration::from_secs(2));
         });
-        Agent { cmd, events, policy }
+        Agent { cmd, events, wake, policy }
+    }
+
+    /// Har hodisada chaqiriladigan uyg'otuvchini o'rnatadi (masalan, UI'ni qayta chizish). Navbatda turgan
+    /// hodisalar bo'lishi mumkinligi uchun bir marta darhol ham chaqiriladi.
+    pub fn set_waker(&self, w: Waker) {
+        *self.wake.lock().unwrap_or_else(|e| e.into_inner()) = Some(w.clone());
+        w(&AgentEvent::Status { online: false, text: String::new() });
     }
 
     pub fn try_event(&self) -> Option<AgentEvent> {
@@ -167,7 +202,7 @@ async fn run(
     cfg: AgentConfig,
     policy: Arc<Mutex<Policy>>,
     mut cmds: mpsc::UnboundedReceiver<Cmd>,
-    ev: std_mpsc::Sender<AgentEvent>,
+    ev: EvTx,
 ) {
     let mut subs: Vec<String> = vec![];
     let mut cfg = cfg;
@@ -211,7 +246,7 @@ async fn session(
     cfg: &mut AgentConfig,
     policy: &Arc<Mutex<Policy>>,
     cmds: &mut mpsc::UnboundedReceiver<Cmd>,
-    ev: &std_mpsc::Sender<AgentEvent>,
+    ev: &EvTx,
     subs: &mut Vec<String>,
 ) -> Result<Exit> {
     let addr = tokio::net::lookup_host(cfg.server.as_str())
@@ -222,7 +257,7 @@ async fn session(
     let bind: SocketAddr = if addr.is_ipv6() { "[::]:0".parse()? } else { "0.0.0.0:0".parse()? };
     let endpoint = quinn::Endpoint::client(bind).context("klient portini ochib bo'lmadi")?;
     let seen: tls::SeenCert = Arc::new(Mutex::new(None));
-    let ccfg = tls::client_config_alpn(seen.clone(), ALPN, MAX_BIDI)?;
+    let ccfg = tls::client_config_alpn(seen.clone(), ALPN, MAX_BIDI, tls::Timing::RELAY)?;
     let conn = timeout(
         STEP_TIMEOUT,
         endpoint.connect_with(ccfg, addr, SERVER_NAME).context("ulanishni boshlab bo'lmadi")?,

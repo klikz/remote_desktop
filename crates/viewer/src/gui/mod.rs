@@ -5,6 +5,7 @@ mod firewall;
 mod hostpanel;
 #[cfg(windows)]
 mod winhost;
+mod yuv;
 mod hosts;
 mod input;
 mod keys;
@@ -814,7 +815,7 @@ impl App {
 
         // Yangi kadr bo'lsa tekstura yangilanadi
         if let Some(pic) = shared.picture.lock().unwrap().take() {
-            let img = egui::ColorImage::from_rgb([pic.w, pic.h], &pic.rgb);
+            let img = pic.image;
             match &mut self.tex {
                 Some(t) => t.set(img, TextureOptions::LINEAR),
                 None => self.tex = Some(ctx.load_texture("video", img, TextureOptions::LINEAR)),

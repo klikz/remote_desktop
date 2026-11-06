@@ -169,7 +169,33 @@ async fn task(tx: mpsc::Sender<Cmd>, mut rx: mpsc::Receiver<Cmd>) {
     let mut phys: Option<(i32, i32)> = None;
     let mut in_err = 0u32;
 
-    while let Some(cmd) = rx.recv().await {
+    // Ketma-ket sichqoncha harakatlarini birlashtirishda navbatdan olingan keyingi buyruq
+    let mut pending: Option<Cmd> = None;
+    loop {
+        let cmd = match pending.take() {
+            Some(c) => c,
+            None => match rx.recv().await {
+                Some(c) => c,
+                None => break,
+            },
+        };
+        let cmd = match cmd {
+            Cmd::Input(ev @ InputEvent::PointerMove { .. }) => {
+                let mut last = ev;
+                loop {
+                    match rx.try_recv() {
+                        Ok(Cmd::Input(m @ InputEvent::PointerMove { .. })) => last = m,
+                        Ok(other) => {
+                            pending = Some(other);
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                Cmd::Input(last)
+            }
+            other => other,
+        };
         match cmd {
             Cmd::Open(reply) => {
                 let Some(conn) = &conn else {

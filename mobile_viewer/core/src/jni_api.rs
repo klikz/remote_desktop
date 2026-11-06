@@ -2,8 +2,8 @@
 
 use crate::session::{self, Event, Params, Sess};
 use jni::{
-    objects::{JObject, JString},
-    sys::{jboolean, jbyteArray, jint, jlongArray, jstring, JNI_FALSE, JNI_TRUE},
+    objects::{JByteBuffer, JObject, JString},
+    sys::{jboolean, jint, jlong, jlongArray, jstring, JNI_FALSE, JNI_TRUE},
     JNIEnv,
 };
 use protocol::InputEvent;
@@ -189,17 +189,48 @@ pub extern "system" fn Java_com_remotedesktop_mobile_Native_confirm(_env: JNIEnv
     }
 }
 
-/// Keyingi kadr: birinchi bayt 1 = kalit-kadr, qolgani Annex-B. Vaqt tugasa null.
+/// Keyingi kadrni kutadi: `-1` = vaqt tugadi, aks holda `(baytlar << 1) | kalit_kadr`. Kadr `copyFrame` yoki
+/// `discardFrame` gacha Rust tomonda turadi (Java'da massiv yaratilmaydi).
 #[no_mangle]
-pub extern "system" fn Java_com_remotedesktop_mobile_Native_nextFrame(env: JNIEnv, _o: JObject, timeout_ms: jint) -> jbyteArray {
-    let Some(c) = current() else { return std::ptr::null_mut() };
-    let Some(f) = c.next_frame(Duration::from_millis(timeout_ms.max(1) as u64)) else { return std::ptr::null_mut() };
-    let mut buf = Vec::with_capacity(f.data.len() + 1);
-    buf.push(f.keyframe as u8);
-    buf.extend_from_slice(&f.data);
-    match env.byte_array_from_slice(&buf) {
-        Ok(a) => a.into_raw(),
-        Err(_) => std::ptr::null_mut(),
+pub extern "system" fn Java_com_remotedesktop_mobile_Native_waitFrame(_env: JNIEnv, _o: JObject, timeout_ms: jint) -> jlong {
+    let Some(c) = current() else { return -1 };
+    match c.wait_frame(Duration::from_millis(timeout_ms.max(1) as u64)) {
+        Some((len, key)) => ((len as jlong) << 1) | jlong::from(key),
+        None => -1,
+    }
+}
+
+/// Kutilgan kadrni MediaCodec'ning kirish buferiga (direct `ByteBuffer`) to'g'ridan-to'g'ri ko'chiradi: yagona nusxa.
+/// Natija: baytlar soni yoki `-1` (bufer sig'madi / kadr yo'q: kadr tashlandi, kalit kadr so'raldi).
+#[no_mangle]
+pub extern "system" fn Java_com_remotedesktop_mobile_Native_copyFrame(env: JNIEnv, _o: JObject, buf: JByteBuffer) -> jint {
+    let Some(c) = current() else { return -1 };
+    let (Ok(ptr), Ok(cap)) = (env.get_direct_buffer_address(&buf), env.get_direct_buffer_capacity(&buf)) else {
+        c.discard_frame(true);
+        return -1;
+    };
+    if ptr.is_null() {
+        c.discard_frame(true);
+        return -1;
+    }
+    // SAFETY: JVM bergan direct bufer manzili va sig'imi; bufer shu chaqiruv davomida Java tomonda ushlab turiladi.
+    let dst = unsafe { std::slice::from_raw_parts_mut(ptr, cap) };
+    c.copy_frame(dst).map_or(-1, |n| n as jint)
+}
+
+/// Kutilgan kadrni tashlaydi. `chainBroken`: dekoder kadrni ololmadi, kalit kadr so'raladi.
+#[no_mangle]
+pub extern "system" fn Java_com_remotedesktop_mobile_Native_discardFrame(_env: JNIEnv, _o: JObject, chain_broken: jboolean) {
+    if let Some(c) = current() {
+        c.discard_frame(chain_broken != JNI_FALSE);
+    }
+}
+
+/// Dekoder xatosi yoki qayta yaratildi: Host'dan kalit kadr so'raladi.
+#[no_mangle]
+pub extern "system" fn Java_com_remotedesktop_mobile_Native_requestKeyframe(_env: JNIEnv, _o: JObject) {
+    if let Some(c) = current() {
+        c.request_keyframe();
     }
 }
 

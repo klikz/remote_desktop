@@ -29,8 +29,20 @@ object Native {
     external fun networkChanged()
     external fun confirm(accept: Boolean)
 
-    /** Birinchi bayt 1 = kalit-kadr, qolgani Annex-B H.264. Vaqt tugasa null. */
-    external fun nextFrame(timeoutMs: Int): ByteArray?
+    /**
+     * Keyingi kadrni kutadi: `-1` = vaqt tugadi, aks holda `(baytlar shl 1) or kalit_kadr`.
+     * Kadr [copyFrame] yoki [discardFrame] chaqirilguncha Rust tomonda saqlanadi.
+     */
+    external fun waitFrame(timeoutMs: Int): Long
+
+    /** Kutilgan kadrni MediaCodec kirish buferiga (direct) ko'chiradi. `-1`: sig'madi, kadr tashlandi. */
+    external fun copyFrame(buf: java.nio.ByteBuffer): Int
+
+    /** Kutilgan kadrni tashlaydi. `chainBroken`: dekoder kadrni ololmadi, Host'dan kalit kadr so'raladi. */
+    external fun discardFrame(chainBroken: Boolean)
+
+    /** Dekoder xatosi yoki qayta yaratildi: Host'dan kalit kadr so'raladi. */
+    external fun requestKeyframe()
 
     /** `[kadrlar, baytlar, rtt_us]` */
     external fun stats(): LongArray?

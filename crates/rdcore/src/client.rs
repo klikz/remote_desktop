@@ -297,6 +297,34 @@ impl Session {
         Ok(())
     }
 
+    /// Bir nechta kiritish hodisasini bitta yozuv bilan yuboradi (ketma-ket sichqoncha harakatlaridan faqat
+    /// oxirgisi qoladi): kamroq paket, kamroq kechikish.
+    pub async fn send_inputs(&mut self, events: impl IntoIterator<Item = protocol::InputEvent>) -> Result<()> {
+        let mut buf = Vec::new();
+        for ev in crate::pacing::coalesce_inputs(events) {
+            buf.extend_from_slice(&protocol::encode_frame(&Message::Input(ev)));
+        }
+        if !buf.is_empty() {
+            self.send.write_all(&buf).await?;
+        }
+        Ok(())
+    }
+
+    /// Host'dan kalit kadr (IDR) so'raydi.
+    pub async fn request_keyframe(&mut self) -> Result<()> {
+        write_message(&mut self.send, &Message::RequestKeyframe).await
+    }
+
+    /// Oxirgi qabul qilingan kadr va dekoder navbati haqida Host'ga xabar beradi (`pacing`).
+    pub async fn send_feedback(&mut self, last_pts_us: u64, queue: u8) -> Result<()> {
+        write_message(&mut self.send, &Message::Feedback { last_pts_us, queue }).await
+    }
+
+    /// QUIC o'lchagan aylanish vaqti (RTT): alohida ping kerak emas.
+    pub fn rtt(&self) -> Duration {
+        self.conn.rtt()
+    }
+
     /// Hostdan videoni boshlashni so'raydi va kadrlar oqimini qaytaradi.
     pub async fn request_video(&mut self, fps: u16, kbps: u32, max_height: u16, monitor: u8) -> Result<VideoStream> {
         write_message(&mut self.send, &Message::VideoRequest { fps, kbps, max_height, monitor }).await?;
@@ -321,20 +349,25 @@ impl Session {
         self.ping_within(STEP_TIMEOUT).await
     }
 
-    /// `ping`, lekin Pong uchun `wait` gacha kutadi (mobil tarmoqda qisqa uzilishlarga chidamli).
-    /// Vaqt tugasa oqim buzilgan hisoblanadi: sessiyani tugatish kerak.
+    /// `ping`, lekin Pong uchun `wait` gacha kutadi. Pong'dan oldin kelgan boshqa xabarlar (yoki eski Pong'lar)
+    /// o'tkazib yuboriladi. Vaqt tugasa oqim buzilgan hisoblanadi: sessiyani tugatish kerak.
     pub async fn ping_within(&mut self, wait: Duration) -> Result<Duration> {
         let id = self.next_ping;
         self.next_ping += 1;
         let start = Instant::now();
         write_message(&mut self.send, &Message::Ping { id, sent_ms: now_ms() }).await?;
-        match timeout(wait, read_message(&mut self.recv))
-            .await
-            .context("Pong kelmadi (vaqt tugadi)")??
-        {
-            Message::Pong { id: got, .. } if got == id => Ok(start.elapsed()),
-            other => bail!("kutilmagan javob: {other:?}"),
-        }
+        let recv = &mut self.recv;
+        timeout(wait, async move {
+            loop {
+                if let Message::Pong { id: got, .. } = read_message(recv).await? {
+                    if got == id {
+                        return Ok::<_, anyhow::Error>(start.elapsed());
+                    }
+                }
+            }
+        })
+        .await
+        .context("Pong kelmadi (vaqt tugadi)")?
     }
 
     /// Ulanishni tartibli yopadi.

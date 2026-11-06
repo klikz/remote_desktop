@@ -10,6 +10,7 @@ use protocol::{InputEvent, DEFAULT_PORT};
 use rdcore::{
     client::{connect_relayed, connect_with, ConnectOptions, Rejected, Transport, VideoRefused},
     known_hosts::KnownHosts,
+    pacing::{ViewerFeedback, FEEDBACK_INTERVAL},
     paths,
     relay::agent::Connector,
 };
@@ -26,8 +27,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 /// Uzilgandan keyin shuncha vaqt davomida qayta ulanishga urinadi.
 const RECONNECT_WINDOW: Duration = Duration::from_secs(90);
-/// Pong shuncha vaqt kelmasa aloqa uzilgan hisoblanadi (mobil tarmoqdagi qisqa uzilishlarga chidamli).
-const PONG_WAIT: Duration = Duration::from_secs(20);
 
 #[derive(Clone)]
 pub struct Params {
@@ -68,7 +67,6 @@ pub enum Event {
 }
 
 enum Cmd {
-    Input(InputEvent),
     Close,
     /// Qurilma tarmog'i o'zgardi: eski ulanish yaroqsiz, darrov yangisini ochish kerak.
     NetworkChanged,
@@ -86,15 +84,20 @@ enum End {
 
 pub struct Sess {
     cmd: UnboundedSender<Cmd>,
+    /// Kiritish alohida kanalda: tarmoq sikli navbatdagilarni birdaniga olib, bitta yozuv bilan yuboradi.
+    input: UnboundedSender<InputEvent>,
     events: Mutex<mpsc::Receiver<Event>>,
     frames: Mutex<mpsc::Receiver<Frame>>,
+    /// `wait_frame` olgan, lekin hali dekoder buferiga ko'chirilmagan kadr.
+    pending: Mutex<Option<Frame>>,
+    fb: Arc<ViewerFeedback>,
     confirm: Arc<Mutex<Option<mpsc::Sender<bool>>>>,
     pub stats: Arc<Stats>,
 }
 
 impl Sess {
     pub fn input(&self, ev: InputEvent) {
-        let _ = self.cmd.send(Cmd::Input(ev));
+        let _ = self.input.send(ev);
     }
 
     pub fn close(&self) {
@@ -110,9 +113,44 @@ impl Sess {
         self.events.lock().ok()?.try_recv().ok()
     }
 
-    /// Kadr kutadi (bloklaydi, eng ko'pi bilan `timeout`).
-    pub fn next_frame(&self, timeout: Duration) -> Option<Frame> {
-        self.frames.lock().ok()?.recv_timeout(timeout).ok()
+    /// Kadr kutadi (bloklaydi, eng ko'pi bilan `timeout`). Kadr `copy_frame` yoki `discard_frame` gacha saqlanadi.
+    /// Natija: (baytlar soni, kalit kadrmi).
+    pub fn wait_frame(&self, timeout: Duration) -> Option<(usize, bool)> {
+        let f = self.frames.lock().ok()?.recv_timeout(timeout).ok()?;
+        self.fb.dequeued();
+        let meta = (f.data.len(), f.keyframe);
+        if let Ok(mut p) = self.pending.lock() {
+            *p = Some(f);
+        }
+        Some(meta)
+    }
+
+    /// Saqlangan kadrni `dst` ga (dekoderning kirish buferiga) ko'chiradi. Sig'masa kadr tashlanadi, kalit kadr
+    /// so'raladi va `None` qaytadi.
+    pub fn copy_frame(&self, dst: &mut [u8]) -> Option<usize> {
+        let f = self.pending.lock().ok()?.take()?;
+        if f.data.len() > dst.len() {
+            self.fb.request_keyframe();
+            return None;
+        }
+        dst[..f.data.len()].copy_from_slice(&f.data);
+        Some(f.data.len())
+    }
+
+    /// Saqlangan kadrni tashlaydi. `chain_broken`: dekoder kadrni ololmadi (zanjir uzildi), kalit kadr so'raladi;
+    /// `false`: dekoder baribir kalit kadrni kutayotgan edi.
+    pub fn discard_frame(&self, chain_broken: bool) {
+        if let Ok(mut p) = self.pending.lock() {
+            p.take();
+        }
+        if chain_broken {
+            self.fb.request_keyframe();
+        }
+    }
+
+    /// Dekoder xatosi yoki qayta yaratildi: keyingi kalit kadrgacha kadrlar tashlanadi va Host'dan so'raladi.
+    pub fn request_keyframe(&self) {
+        self.fb.request_keyframe();
     }
 
     pub fn answer_confirm(&self, accept: bool) {
@@ -132,20 +170,25 @@ impl Drop for Sess {
 
 pub fn start(p: Params) -> Arc<Sess> {
     let (cmd_tx, cmd_rx) = unbounded_channel();
+    let (input_tx, input_rx) = unbounded_channel();
     let (ev_tx, ev_rx) = mpsc::channel();
     let (frame_tx, frame_rx) = mpsc::sync_channel::<Frame>(8);
     let stats = Arc::new(Stats::default());
     let confirm = Arc::new(Mutex::new(None));
+    let fb = Arc::new(ViewerFeedback::default());
     let sess = Arc::new(Sess {
         cmd: cmd_tx,
+        input: input_tx,
         events: Mutex::new(ev_rx),
         frames: Mutex::new(frame_rx),
+        pending: Mutex::new(None),
+        fb: fb.clone(),
         confirm: confirm.clone(),
         stats: stats.clone(),
     });
     std::thread::spawn(move || {
         let ended = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
-            Ok(rt) => rt.block_on(run(p, stats, ev_tx.clone(), confirm, frame_tx, cmd_rx)),
+            Ok(rt) => rt.block_on(run(p, stats, ev_tx.clone(), confirm, frame_tx, cmd_rx, input_rx, fb)),
             Err(e) => Err(e.into()),
         };
         let msg = match ended {
@@ -188,7 +231,6 @@ async fn wait_or_close(cmd_rx: &mut UnboundedReceiver<Cmd>, dur: Duration) -> bo
             c = cmd_rx.recv() => match c {
                 Some(Cmd::Close) | None => return true,
                 Some(Cmd::NetworkChanged) => return false,
-                Some(Cmd::Input(_)) => {}
             },
         }
     }
@@ -211,6 +253,8 @@ async fn run(
     confirm_slot: Arc<Mutex<Option<mpsc::Sender<bool>>>>,
     frame_tx: mpsc::SyncSender<Frame>,
     mut cmd_rx: UnboundedReceiver<Cmd>,
+    mut input_rx: UnboundedReceiver<InputEvent>,
+    fb: Arc<ViewerFeedback>,
 ) -> Result<Option<String>> {
     let known_hosts = KnownHosts::new(paths::known_hosts_file()?);
 
@@ -233,7 +277,9 @@ async fn run(
     let mut attempt = 0u32;
     loop {
         let mut up = false;
-        let end = match run_once(&p, &stats, &ev_tx, &confirm, &known_hosts, &frame_tx, &mut cmd_rx, &mut up).await {
+        let end = match run_once(&p, &stats, &ev_tx, &confirm, &known_hosts, &frame_tx, &mut cmd_rx, &mut input_rx, &fb, &mut up)
+            .await
+        {
             Ok(end) => end,
             // Kalit rad etildi / fingerprint o'zgargan / Host videoni rad etdi: qayta urinish befoyda.
             Err(e) if e.downcast_ref::<Rejected>().is_some() || e.downcast_ref::<VideoRefused>().is_some() => return Err(e),
@@ -277,6 +323,8 @@ async fn run_once(
     known_hosts: &KnownHosts,
     frame_tx: &mpsc::SyncSender<Frame>,
     cmd_rx: &mut UnboundedReceiver<Cmd>,
+    input_rx: &mut UnboundedReceiver<InputEvent>,
+    fb: &Arc<ViewerFeedback>,
     up: &mut bool,
 ) -> Result<End> {
     let mut session = match &p.connector {
@@ -319,23 +367,28 @@ async fn run_once(
     let mut stream = session.request_video(p.fps, p.kbps, p.height, 0).await?;
     let _ = ev_tx.send(Event::VideoStarted);
     *up = true;
+    // Yangi oqim: eski holat tozalanadi, uzilish paytida bosilgan tugmalar Host'ga yuborilmaydi.
+    fb.reset();
+    while input_rx.try_recv().is_ok() {}
 
     // next_frame() ni timeout/select bilan uzib bo'lmaydi (oqim buziladi): alohida vazifa, kerak bo'lsa abort.
     let rx_stats = stats.clone();
+    let rx_fb = fb.clone();
     let frame_tx = frame_tx.clone();
     let mut recv_task = tokio::spawn(async move {
-        let mut need_key = false;
         loop {
             match stream.next_frame().await {
                 Ok(Some(f)) => {
                     rx_stats.frames.fetch_add(1, Ordering::Relaxed);
                     rx_stats.bytes.fetch_add(f.data.len() as u64, Ordering::Relaxed);
-                    if need_key && !f.keyframe {
+                    rx_fb.frame_received(f.pts_us);
+                    if !rx_fb.accept(f.keyframe) {
                         continue;
                     }
                     match frame_tx.try_send(Frame { keyframe: f.keyframe, data: f.data }) {
-                        Ok(()) => need_key = false,
-                        Err(TrySendError::Full(_)) => need_key = true,
+                        Ok(()) => rx_fb.queued(),
+                        // Dekoder ulgurmayapti: zanjir uzildi, kalit kadr kerak
+                        Err(TrySendError::Full(_)) => rx_fb.request_keyframe(),
                         Err(TrySendError::Disconnected(_)) => return None,
                     }
                 }
@@ -345,22 +398,47 @@ async fn run_once(
         }
     });
 
-    let mut ping = tokio::time::interval(Duration::from_secs(2));
+    // Feedback, kalit kadr so'rovi va RTT shu taktda; alohida ping yo'q (kiritish javob kutib qolmaydi).
+    // Uzilishni QUIC idle timeout aniqlaydi.
+    let conn = session.connection();
+    let closed = conn.closed();
+    tokio::pin!(closed);
+    let mut tick = tokio::time::interval(FEEDBACK_INTERVAL);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut ticks: u32 = 0;
     let end = loop {
         tokio::select! {
-            c = cmd_rx.recv() => match c {
-                Some(Cmd::Input(ev)) => {
-                    if let Err(e) = session.send_input(ev).await {
-                        break End::Lost(format!("{e:#}"));
-                    }
+            ev = input_rx.recv() => {
+                let Some(ev) = ev else { break End::Closed };
+                let mut batch = vec![ev];
+                while let Ok(ev) = input_rx.try_recv() {
+                    batch.push(ev);
                 }
+                if let Err(e) = session.send_inputs(batch).await {
+                    break End::Lost(format!("{e:#}"));
+                }
+            }
+            c = cmd_rx.recv() => match c {
                 Some(Cmd::NetworkChanged) => break End::Lost("tarmoq o'zgardi".into()),
                 Some(Cmd::Close) | None => break End::Closed,
             },
-            _ = ping.tick() => match session.ping_within(PONG_WAIT).await {
-                Ok(d) => stats.rtt_us.store(d.as_micros() as u64, Ordering::Relaxed),
-                Err(e) => break End::Lost(format!("aloqa uzildi: {e:#}")),
-            },
+            _ = tick.tick() => {
+                if let Some((pts, queue)) = fb.take_feedback() {
+                    if let Err(e) = session.send_feedback(pts, queue).await {
+                        break End::Lost(format!("{e:#}"));
+                    }
+                }
+                if fb.take_keyframe_request() {
+                    if let Err(e) = session.request_keyframe().await {
+                        break End::Lost(format!("{e:#}"));
+                    }
+                }
+                ticks = ticks.wrapping_add(1);
+                if ticks % 20 == 0 {
+                    stats.rtt_us.store(session.rtt().as_micros() as u64, Ordering::Relaxed);
+                }
+            }
+            e = &mut closed => break End::Lost(format!("aloqa uzildi: {e}")),
             r = &mut recv_task => break match r {
                 Ok(None) => End::Closed,
                 Ok(Some(m)) => End::Lost(m),

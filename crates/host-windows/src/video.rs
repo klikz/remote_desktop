@@ -1,4 +1,11 @@
 //! Ekran olish va H.264 kodlash oqimi (alohida std thread). Kodlangan kadrlar tokio kanaliga yuboriladi.
+//!
+//! Trafik va CPU uchun:
+//! - Ekran o'zgarmasa kadr kodlanmaydi va yuborilmaydi (oldingi kadr bilan solishtiriladi); uzoq vaqt o'zgarmasa
+//!   ekran yarim tezlikda tekshiriladi.
+//! - Tarmoq yoki Viewer ulgurmasa (`VideoControl::should_skip`) yoki yuborish navbati to'la bo'lsa, kadr **kodlanmaydi**:
+//!   H.264 zanjiri uzilmaydi, shuning uchun katta kalit kadr (IDR) kerak emas.
+//! - IDR faqat boshida, o'lcham o'zgarganda va Viewer so'raganda.
 
 use crate::capture::{scale_bgra, Grabber};
 use anyhow::{anyhow, Result};
@@ -7,6 +14,7 @@ use openh264::{
     formats::{BgraSliceU8, YUVBuffer},
     OpenH264API,
 };
+use rdcore::pacing::VideoControl;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -14,7 +22,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::sync::mpsc::{error::TrySendError, Sender, UnboundedSender};
+use tokio::sync::mpsc::{Sender, UnboundedSender};
 
 pub struct EncodedFrame {
     pub keyframe: bool,
@@ -39,7 +47,8 @@ fn make_encoder(fps: u32, kbps: u32) -> Result<Encoder> {
         .max_frame_rate(fps as f32)
         .rate_control_mode(RateControlMode::Bitrate)
         .usage_type(UsageType::ScreenContentRealTime)
-        .enable_skip_frame(false);
+        // Bitrate chegarasidan oshsa kodlagich kadrni o'zi o'tkazib yuboradi (zanjir uzilmaydi)
+        .enable_skip_frame(true);
     Encoder::with_api_config(OpenH264API::from_source(), cfg).map_err(|e| anyhow!("H.264 kodlagich yaratilmadi: {e}"))
 }
 
@@ -51,16 +60,18 @@ pub fn spawn(
     tx: Sender<EncodedFrame>,
     stop: Arc<AtomicBool>,
     errors: UnboundedSender<String>,
+    ctl: Arc<VideoControl>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        if let Err(e) = run(fps, kbps, max_height, tx, &stop) {
+        if let Err(e) = run(fps, kbps, max_height, tx, &stop, &ctl) {
             let _ = errors.send(format!("{e:#}"));
         }
     })
 }
 
-fn run(fps: u32, kbps: u32, max_height: u32, tx: Sender<EncodedFrame>, stop: &AtomicBool) -> Result<()> {
-    let interval = Duration::from_micros(1_000_000 / u64::from(fps.max(1)));
+fn run(fps: u32, kbps: u32, max_height: u32, tx: Sender<EncodedFrame>, stop: &AtomicBool, ctl: &VideoControl) -> Result<()> {
+    let fps = fps.max(1);
+    let interval = Duration::from_micros(1_000_000 / u64::from(fps));
     let started = Instant::now();
 
     let mut grab = Grabber::new()?;
@@ -68,10 +79,11 @@ fn run(fps: u32, kbps: u32, max_height: u32, tx: Sender<EncodedFrame>, stop: &At
     let mut enc = make_encoder(fps, kbps)?;
     let mut yuv = YUVBuffer::new(tw, th);
     let mut scaled: Vec<u8> = Vec::new();
-
-    let mut n: u64 = 0;
+    // Oldingi olingan kadr: o'zgarmagan ekranni kodlamaslik uchun
+    let mut prev: Vec<u8> = Vec::new();
+    // Ketma-ket o'zgarmagan kadrlar soni (1 soniyadan oshsa ekran yarim tezlikda tekshiriladi)
+    let mut idle: u32 = 0;
     let mut force_key = true;
-    let mut dropping = false;
 
     while !stop.load(Ordering::Relaxed) {
         let t0 = Instant::now();
@@ -82,41 +94,61 @@ fn run(fps: u32, kbps: u32, max_height: u32, tx: Sender<EncodedFrame>, stop: &At
             (tw, th) = target_size(grab.w, grab.h, max_height);
             enc = make_encoder(fps, kbps)?;
             yuv = YUVBuffer::new(tw, th);
+            prev.clear();
+            force_key = true;
+        }
+        if ctl.take_keyframe_request() {
             force_key = true;
         }
 
-        let (sw, sh) = (grab.w, grab.h);
-        let frame = grab.grab();
-        scale_bgra(frame, sw, sh, tw, th, &mut scaled);
-        yuv.read_rgb(BgraSliceU8::new(&scaled, (tw, th)));
+        'frame: {
+            // Tarmoq/Viewer ulgurmayapti yoki yuborish navbati to'la: shu kadr kodlanmaydi
+            if ctl.should_skip() || tx.capacity() == 0 {
+                break 'frame;
+            }
+            let (sw, sh) = (grab.w, grab.h);
+            let frame = grab.grab();
+            if !force_key && frame == prev.as_slice() {
+                idle = idle.saturating_add(1);
+                break 'frame;
+            }
+            idle = 0;
+            prev.clear();
+            prev.extend_from_slice(frame);
 
-        if force_key || n % u64::from(fps.max(1)) == 0 {
-            enc.force_intra_frame();
-            force_key = false;
-        }
-        let bs = enc.encode(&yuv).map_err(|e| anyhow!("kodlash xatosi: {e}"))?;
-        let ft = bs.frame_type();
-        if !matches!(ft, FrameType::Skip | FrameType::Invalid) {
+            if tw == sw && th == sh {
+                // Masshtab kerak emas: nusxa olmasdan to'g'ridan-to'g'ri
+                yuv.read_rgb(BgraSliceU8::new(&prev, (tw, th)));
+            } else {
+                scale_bgra(&prev, sw, sh, tw, th, &mut scaled);
+                yuv.read_rgb(BgraSliceU8::new(&scaled, (tw, th)));
+            }
+
+            if force_key {
+                enc.force_intra_frame();
+                force_key = false;
+            }
+            let bs = enc.encode(&yuv).map_err(|e| anyhow!("kodlash xatosi: {e}"))?;
+            let ft = bs.frame_type();
+            if matches!(ft, FrameType::Skip | FrameType::Invalid) {
+                break 'frame;
+            }
             let data = bs.to_vec();
-            if !data.is_empty() {
-                let keyframe = matches!(ft, FrameType::IDR | FrameType::I);
-                // Viewer sekin bo'lsa keyingi kalit kadrgacha kadrlarni tashlaymiz (oqim buzilmasin)
-                if !(dropping && !keyframe) {
-                    let f = EncodedFrame { keyframe, pts_us: started.elapsed().as_micros() as u64, data };
-                    match tx.try_send(f) {
-                        Ok(()) => dropping = false,
-                        Err(TrySendError::Full(_)) => {
-                            dropping = true;
-                            force_key = true;
-                        }
-                        Err(TrySendError::Closed(_)) => return Ok(()),
-                    }
-                }
+            if data.is_empty() {
+                break 'frame;
+            }
+            let keyframe = matches!(ft, FrameType::IDR | FrameType::I);
+            let f = EncodedFrame { keyframe, pts_us: started.elapsed().as_micros() as u64, data };
+            // Joy borligi yuqorida tekshirilgan (yagona yuboruvchi): kutish bo'lmaydi
+            if tx.blocking_send(f).is_err() {
+                return Ok(());
             }
         }
-        n += 1;
 
-        if let Some(rest) = interval.checked_sub(t0.elapsed()) {
+        // Ekran uzoq vaqt o'zgarmasa (1 s dan ko'p) yarim tezlikda tekshiramiz: CPU kamroq, birinchi o'zgarish
+        // eng ko'pi bilan ikki kadr oralig'ida seziladi.
+        let period = if idle > fps { interval * 2 } else { interval };
+        if let Some(rest) = period.checked_sub(t0.elapsed()) {
             std::thread::sleep(rest);
         }
     }

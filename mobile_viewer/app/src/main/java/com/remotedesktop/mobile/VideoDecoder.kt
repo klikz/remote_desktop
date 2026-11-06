@@ -7,7 +7,11 @@ import android.view.Surface
 
 /**
  * Rust'dan kelgan Annex-B H.264 kadrlarni MediaCodec bilan dekodlab, to'g'ridan-to'g'ri Surface'ga chiqaradi.
- * Alohida oqimda ishlaydi; kalit-kadrgacha kelgan kadrlar tashlanadi (SPS/PPS kalit-kadr ichida keladi).
+ * Alohida oqimda ishlaydi. Kadr Rust'dan dekoderning kirish buferiga bir marta ko'chiriladi (Java massivi yaratilmaydi).
+ *
+ * Host kalit kadrni faqat so'ralganda yuboradi, shuning uchun zanjir uzilsa (kirish buferi yo'q, kadr sig'madi,
+ * dekoder xatosi) keyingi kalit kadrgacha kadrlar tashlanadi va Host'dan kalit kadr so'raladi. Dekoder xatosida
+ * kodek qayta yaratiladi: video qotib qolmaydi.
  */
 class VideoDecoder(private val surface: Surface, private val onSize: (Int, Int) -> Unit) {
     @Volatile private var running = true
@@ -23,35 +27,63 @@ class VideoDecoder(private val surface: Surface, private val onSize: (Int, Int) 
     private fun loop() {
         var codec: MediaCodec? = null
         val info = MediaCodec.BufferInfo()
-        var pts = 0L
-        try {
-            while (running) {
-                val frame = Native.nextFrame(20)
-                if (frame != null && frame.size > 1) {
-                    val key = frame[0].toInt() == 1
-                    if (codec == null && key) codec = createCodec()
-                    if (codec != null) {
-                        val idx = codec.dequeueInputBuffer(30_000)
-                        if (idx >= 0) {
-                            val buf = codec.getInputBuffer(idx)!!
-                            val len = minOf(frame.size - 1, buf.capacity())
+        // Kodek yangi yoki zanjir uzilgan: kalit kadr kutilmoqda
+        var needKey = true
+        while (running) {
+            try {
+                val meta = Native.waitFrame(20)
+                if (meta >= 0) {
+                    val key = (meta and 1L) == 1L
+                    if (needKey && !key) {
+                        // Kalit kadr allaqachon so'ralgan: qayta so'ramaymiz
+                        Native.discardFrame(false)
+                    } else {
+                        val c = codec ?: createCodec().also { codec = it }
+                        val idx = c.dequeueInputBuffer(30_000)
+                        if (idx < 0) {
+                            Native.discardFrame(true)
+                            needKey = true
+                        } else {
+                            val buf = c.getInputBuffer(idx)!!
                             buf.clear()
-                            buf.put(frame, 1, len)
-                            pts += 16_666
-                            codec.queueInputBuffer(idx, 0, len, pts, if (key) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
+                            val n = Native.copyFrame(buf)
+                            if (n < 0) {
+                                // Sig'madi: kadr tashlandi va kalit kadr so'raldi; bufer bo'sh holda qaytariladi
+                                c.queueInputBuffer(idx, 0, 0, 0, 0)
+                                needKey = true
+                            } else {
+                                val flags = if (key) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                                c.queueInputBuffer(idx, 0, n, System.nanoTime() / 1000, flags)
+                                if (key) needKey = false
+                            }
                         }
                     }
                 }
-                if (codec != null) drain(codec, info)
+                codec?.let { drain(it, info) }
+            } catch (e: Exception) {
+                android.util.Log.e("rd", "dekoder xatosi: kodek qayta yaratiladi", e)
+                release(codec)
+                codec = null
+                needKey = true
+                Native.requestKeyframe()
+                try {
+                    Thread.sleep(50)
+                } catch (_: InterruptedException) {
+                }
             }
-        } catch (e: Exception) {
-            android.util.Log.e("rd", "dekoder xatosi", e)
-        } finally {
-            try {
-                codec?.stop()
-            } catch (_: Exception) {
-            }
-            codec?.release()
+        }
+        release(codec)
+    }
+
+    private fun release(codec: MediaCodec?) {
+        if (codec == null) return
+        try {
+            codec.stop()
+        } catch (_: Exception) {
+        }
+        try {
+            codec.release()
+        } catch (_: Exception) {
         }
     }
 
@@ -60,6 +92,8 @@ class VideoDecoder(private val surface: Surface, private val onSize: (Int, Int) 
         val fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, 1920, 1080).apply {
             setInteger(MediaFormat.KEY_MAX_WIDTH, 4096)
             setInteger(MediaFormat.KEY_MAX_HEIGHT, 4096)
+            // Katta kalit kadrlar sig'ishi uchun (4K matnli ekran IDR'i 1 MB dan oshishi mumkin)
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 4 * 1024 * 1024)
             if (Build.VERSION.SDK_INT >= 30) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
         }
         return MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).also {

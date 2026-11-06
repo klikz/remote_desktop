@@ -148,3 +148,27 @@ async fn changed_fingerprint_is_refused() {
     let err = res.err().expect("o'zgargan fingerprint rad etilishi kerak");
     assert!(format!("{err:#}").contains("fingerprint"), "xato matni: {err:#}");
 }
+
+/// v2 xabarlari (Feedback, RequestKeyframe) va bitta yozuvga birlashtirilgan kiritish haqiqiy QUIC oqimida
+/// to'g'ri ajratiladi: keyingi ping javobi buzilmagan bo'lishi kerak. RTT QUIC'dan olinadi.
+#[tokio::test(flavor = "multi_thread")]
+async fn batched_input_and_feedback_keep_stream_intact() {
+    use protocol::InputEvent;
+    let (addr, _fp) = start_host().await;
+    let kh = KnownHosts::new(temp_dir("batch").join("known_hosts"));
+    let mut session = connect(ConnectOptions { addr, password: PASSWORD, known_hosts: &kh, confirm_new_host: &|_| true })
+        .await
+        .expect("ulanish");
+
+    let mut batch: Vec<InputEvent> = (0..500u16).map(|i| InputEvent::PointerMove { x: i, y: i }).collect();
+    batch.push(InputEvent::Button { button: 0, pressed: true });
+    batch.push(InputEvent::Key { code: 30, pressed: true });
+    session.send_inputs(batch).await.expect("kiritish");
+    session.send_feedback(123_456, 2).await.expect("feedback");
+    session.request_keyframe().await.expect("kalit kadr so'rovi");
+    for _ in 0..3 {
+        session.ping().await.expect("oqim buzilmagan bo'lishi kerak");
+    }
+    assert!(session.rtt().as_secs() < 2);
+    session.close().await;
+}

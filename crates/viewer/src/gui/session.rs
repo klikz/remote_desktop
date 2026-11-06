@@ -7,9 +7,10 @@ use protocol::{video_reason, InputEvent, DEFAULT_PORT};
 use rdcore::{
     client::{connect_relayed, connect_with, ConnectOptions, Transport, VideoRefused},
     filexfer,
-    relay::agent::Connector,
     known_hosts::KnownHosts,
+    pacing::{ViewerFeedback, FEEDBACK_INTERVAL},
     paths,
+    relay::agent::Connector,
 };
 use std::{
     net::{IpAddr, SocketAddr},
@@ -36,11 +37,9 @@ pub struct Params {
     pub relay: Option<(String, Connector)>,
 }
 
-/// Dekodlangan kadr (RGB, 3 bayt/piksel).
+/// Dekodlangan kadr: tekstura uchun tayyor (rang dekoder oqimida o'girilgan, UI oqimi faqat yuklaydi).
 pub struct Picture {
-    pub w: usize,
-    pub h: usize,
-    pub rgb: Vec<u8>,
+    pub image: egui::ColorImage,
 }
 
 /// Tarmoq oqimi va UI o'rtasida bo'lishiladigan holat.
@@ -68,7 +67,6 @@ pub enum Event {
 }
 
 enum Cmd {
-    Input(InputEvent),
     ResetPermissions,
     ListFiles,
     SendFile(u64, PathBuf),
@@ -78,6 +76,8 @@ enum Cmd {
 
 pub struct Handle {
     cmd: UnboundedSender<Cmd>,
+    /// Kiritish alohida kanalda: tarmoq sikli navbatdagilarni birdaniga olib, bitta yozuv bilan yuboradi.
+    input: UnboundedSender<InputEvent>,
     pub events: mpsc::Receiver<Event>,
     pub shared: Arc<Shared>,
     next_transfer: AtomicU64,
@@ -100,7 +100,7 @@ impl Handle {
         id
     }
     pub fn input(&self, ev: InputEvent) {
-        let _ = self.cmd.send(Cmd::Input(ev));
+        let _ = self.input.send(ev);
     }
     pub fn close(&self) {
         let _ = self.cmd.send(Cmd::Close);
@@ -119,12 +119,13 @@ impl Drop for Handle {
 
 pub fn start(ctx: egui::Context, p: Params) -> Handle {
     let (cmd_tx, cmd_rx) = unbounded_channel();
+    let (input_tx, input_rx) = unbounded_channel();
     let (ev_tx, ev_rx) = mpsc::channel();
     let shared = Arc::new(Shared::default());
     let sh = shared.clone();
     std::thread::spawn(move || {
         let ended = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
-            Ok(rt) => rt.block_on(run(p, ctx.clone(), sh, ev_tx.clone(), cmd_rx)),
+            Ok(rt) => rt.block_on(run(p, ctx.clone(), sh, ev_tx.clone(), cmd_rx, input_rx)),
             Err(e) => Err(e.into()),
         };
         let msg = match ended {
@@ -134,7 +135,7 @@ pub fn start(ctx: egui::Context, p: Params) -> Handle {
         let _ = ev_tx.send(Event::Ended(msg));
         ctx.request_repaint();
     });
-    Handle { cmd: cmd_tx, events: ev_rx, shared, next_transfer: AtomicU64::new(1) }
+    Handle { cmd: cmd_tx, input: input_tx, events: ev_rx, shared, next_transfer: AtomicU64::new(1) }
 }
 
 /// Uzatish borishini UI'ga yetkazadi (juda tez-tez emas: 100 ms da bir marta).
@@ -215,6 +216,7 @@ async fn run(
     shared: Arc<Shared>,
     ev_tx: mpsc::Sender<Event>,
     mut cmd_rx: UnboundedReceiver<Cmd>,
+    mut input_rx: UnboundedReceiver<InputEvent>,
 ) -> Result<Option<String>> {
     let known_hosts = KnownHosts::new(paths::known_hosts_file()?);
 
@@ -275,7 +277,7 @@ async fn run(
                             session.reset_permissions().await?;
                             break;
                         }
-                        Some(Cmd::Input(_) | Cmd::ListFiles | Cmd::SendFile(..) | Cmd::GetFile(..)) => {}
+                        Some(Cmd::ListFiles | Cmd::SendFile(..) | Cmd::GetFile(..)) => {}
                         Some(Cmd::Close) | None => {
                             session.close().await;
                             return Ok(None);
@@ -289,11 +291,17 @@ async fn run(
     let _ = ev_tx.send(Event::VideoStarted);
     ctx.request_repaint();
 
-    // Dekoder oqimi: eng yangi kadr `shared.picture` ga yoziladi.
+    // Video kutilayotganda bosilgan tugmalar Host'ga yuborilmaydi (eskirgan hodisalar).
+    while input_rx.try_recv().is_ok() {}
+    let fb = Arc::new(ViewerFeedback::default());
+
+    // Dekoder oqimi: eng yangi kadr `shared.picture` ga yoziladi. Xato bo'lsa keyingi kalit kadrgacha kadrlar
+    // tashlanadi va Host'dan kalit kadr so'raladi (Host kalit kadrni faqat so'ralganda yuboradi).
     let (ftx, frx) = mpsc::sync_channel::<Vec<u8>>(8);
     {
         let shared = shared.clone();
         let ctx = ctx.clone();
+        let fb = fb.clone();
         std::thread::spawn(move || {
             let mut decoder = match Decoder::new() {
                 Ok(d) => d,
@@ -303,16 +311,20 @@ async fn run(
                 }
             };
             while let Ok(data) = frx.recv() {
+                fb.dequeued();
                 match decoder.decode(&data) {
                     Ok(Some(yuv)) => {
                         let (w, h) = yuv.dimensions();
-                        let mut rgb = vec![0u8; w * h * 3];
-                        yuv.write_rgb8(&mut rgb);
-                        *shared.picture.lock().unwrap() = Some(Picture { w, h, rgb });
+                        let pixels = super::yuv::to_color32((yuv.y(), yuv.u(), yuv.v()), yuv.strides(), (w, h));
+                        let image = egui::ColorImage { size: [w, h], pixels };
+                        *shared.picture.lock().unwrap() = Some(Picture { image });
                         ctx.request_repaint();
                     }
                     Ok(None) => {}
-                    Err(e) => eprintln!("dekodlash xatosi: {e}"),
+                    Err(e) => {
+                        eprintln!("dekodlash xatosi: {e}");
+                        fb.request_keyframe();
+                    }
                 }
             }
         });
@@ -321,19 +333,21 @@ async fn run(
     // Kadrlarni qabul qilish. next_frame() ni timeout/select bilan uzib bo'lmaydi (oqim buziladi),
     // shuning uchun u alohida vazifada ishlaydi va kerak bo'lsa butunlay abort qilinadi.
     let rx_shared = shared.clone();
+    let rx_fb = fb.clone();
     let mut recv_task = tokio::spawn(async move {
-        let mut need_key = false;
         loop {
             match stream.next_frame().await {
                 Ok(Some(f)) => {
                     rx_shared.frames.fetch_add(1, Ordering::Relaxed);
                     rx_shared.bytes.fetch_add(f.data.len() as u64, Ordering::Relaxed);
-                    if need_key && !f.keyframe {
+                    rx_fb.frame_received(f.pts_us);
+                    if !rx_fb.accept(f.keyframe) {
                         continue;
                     }
                     match ftx.try_send(f.data) {
-                        Ok(()) => need_key = false,
-                        Err(TrySendError::Full(_)) => need_key = true,
+                        Ok(()) => rx_fb.queued(),
+                        // Dekoder ulgurmayapti: zanjir uzildi, kalit kadr kerak
+                        Err(TrySendError::Full(_)) => rx_fb.request_keyframe(),
                         Err(TrySendError::Disconnected(_)) => return None,
                     }
                 }
@@ -343,15 +357,27 @@ async fn run(
         }
     });
 
-    let mut ping = tokio::time::interval(Duration::from_secs(2));
+    // Feedback va kalit kadr so'rovlari shu taktda yuboriladi; RTT QUIC'dan olinadi (alohida ping yo'q,
+    // shuning uchun kiritish hech qachon javob kutib qolmaydi). Uzilishni QUIC idle timeout aniqlaydi.
+    let conn = session.connection();
+    let closed = conn.closed();
+    tokio::pin!(closed);
+    let mut tick = tokio::time::interval(FEEDBACK_INTERVAL);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut ticks: u32 = 0;
     let end = loop {
         tokio::select! {
-            c = cmd_rx.recv() => match c {
-                Some(Cmd::Input(ev)) => {
-                    if let Err(e) = session.send_input(ev).await {
-                        break Some(format!("{e:#}"));
-                    }
+            ev = input_rx.recv() => {
+                let Some(ev) = ev else { break None };
+                let mut batch = vec![ev];
+                while let Ok(ev) = input_rx.try_recv() {
+                    batch.push(ev);
                 }
+                if let Err(e) = session.send_inputs(batch).await {
+                    break Some(format!("{e:#}"));
+                }
+            }
+            c = cmd_rx.recv() => match c {
                 Some(Cmd::ResetPermissions) => {
                     if let Err(e) = session.reset_permissions().await {
                         break Some(format!("{e:#}"));
@@ -362,10 +388,23 @@ async fn run(
                 }
                 Some(Cmd::Close) | None => break None,
             },
-            _ = ping.tick() => match session.ping().await {
-                Ok(d) => shared.rtt_us.store(d.as_micros() as u64, Ordering::Relaxed),
-                Err(e) => break Some(format!("aloqa uzildi: {e:#}")),
-            },
+            _ = tick.tick() => {
+                if let Some((pts, queue)) = fb.take_feedback() {
+                    if let Err(e) = session.send_feedback(pts, queue).await {
+                        break Some(format!("{e:#}"));
+                    }
+                }
+                if fb.take_keyframe_request() {
+                    if let Err(e) = session.request_keyframe().await {
+                        break Some(format!("{e:#}"));
+                    }
+                }
+                ticks = ticks.wrapping_add(1);
+                if ticks % 20 == 0 {
+                    shared.rtt_us.store(session.rtt().as_micros() as u64, Ordering::Relaxed);
+                }
+            }
+            e = &mut closed => break Some(format!("aloqa uzildi: {e}")),
             r = &mut recv_task => break r.unwrap_or_else(|_| Some("video vazifasi to'xtadi".to_string())),
         }
     };

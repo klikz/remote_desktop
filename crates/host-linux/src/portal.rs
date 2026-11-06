@@ -259,6 +259,25 @@ async fn portal_task(token_path: PathBuf, mut rx: mpsc::Receiver<Cmd>) {
             };
             let (want, reply) = match cmd {
                 Cmd::Input(ev) => {
+                    // Navbatdagi ketma-ket sichqoncha harakatlaridan faqat oxirgisi bajariladi (har biri D-Bus chaqiruvi):
+                    // Host va gnome-shell CPU'si kamayadi, kursor esa orqada qolmaydi.
+                    let ev = match ev {
+                        InputEvent::PointerMove { .. } => {
+                            let mut last = ev;
+                            loop {
+                                match rx.try_recv() {
+                                    Ok(Cmd::Input(m @ InputEvent::PointerMove { .. })) => last = m,
+                                    Ok(other) => {
+                                        next = Some(other);
+                                        break;
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                            last
+                        }
+                        other => other,
+                    };
                     match ev {
                         InputEvent::PointerMove { x, y } => {
                             // Maqsad: logik koordinata (portal bergan o'lcham).

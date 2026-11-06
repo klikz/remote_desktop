@@ -20,6 +20,7 @@ pub mod fsutil;
 pub mod hexfmt;
 pub mod known_hosts;
 pub mod onetime;
+pub mod pacing;
 pub mod paths;
 pub mod ratelimit;
 pub mod relay;

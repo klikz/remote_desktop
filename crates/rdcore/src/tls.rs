@@ -25,22 +25,38 @@ fn provider() -> Arc<CryptoProvider> {
     Arc::new(ring_provider::default_provider())
 }
 
-fn transport(max_bidi: u32) -> Result<Arc<quinn::TransportConfig>> {
+/// Ulanish turi bo'yicha keepalive va uzilishni aniqlash vaqti.
+#[derive(Clone, Copy, Debug)]
+pub struct Timing {
+    pub keep_alive: Duration,
+    pub idle_timeout: Duration,
+}
+
+impl Timing {
+    /// Host <-> Viewer sessiyasi: uzilish ~20 soniyada aniqlanadi (ilova darajasidagi ping kerak emas).
+    pub const SESSION: Timing = Timing { keep_alive: Duration::from_secs(5), idle_timeout: Duration::from_secs(20) };
+    /// Relay serveriga doimiy (ko'pincha bo'sh) ulanish: kamroq uyg'onish va fon trafigi (NAT uchun 15 s yetarli).
+    pub const RELAY: Timing = Timing { keep_alive: Duration::from_secs(15), idle_timeout: Duration::from_secs(45) };
+}
+
+fn transport(max_bidi: u32, timing: Timing) -> Result<Arc<quinn::TransportConfig>> {
     let mut t = quinn::TransportConfig::default();
     t.max_concurrent_bidi_streams(max_bidi.into());
-    t.keep_alive_interval(Some(Duration::from_secs(5)));
-    t.max_idle_timeout(Some(
-        quinn::IdleTimeout::try_from(Duration::from_secs(30)).context("idle timeout")?,
-    ));
+    t.keep_alive_interval(Some(timing.keep_alive));
+    t.max_idle_timeout(Some(quinn::IdleTimeout::try_from(timing.idle_timeout).context("idle timeout")?));
+    // Tajriba uchun: RD_CC=bbr (standart: Cubic). BBR navbat kechikishini kamroq ushlaydi, o'lchab tanlanadi.
+    if std::env::var("RD_CC").is_ok_and(|v| v.eq_ignore_ascii_case("bbr")) {
+        t.congestion_controller_factory(Arc::new(quinn::congestion::BbrConfig::default()));
+    }
     Ok(Arc::new(t))
 }
 
 pub fn server_config(identity: &HostIdentity) -> Result<quinn::ServerConfig> {
-    server_config_alpn(identity, protocol::ALPN, 16)
+    server_config_alpn(identity, protocol::ALPN, 16, Timing::SESSION)
 }
 
-/// Boshqa ALPN va oqimlar soni bilan (relay serveri).
-pub fn server_config_alpn(identity: &HostIdentity, alpn: &[u8], max_bidi: u32) -> Result<quinn::ServerConfig> {
+/// Boshqa ALPN, oqimlar soni va vaqtlar bilan (relay serveri).
+pub fn server_config_alpn(identity: &HostIdentity, alpn: &[u8], max_bidi: u32, timing: Timing) -> Result<quinn::ServerConfig> {
     let mut tls = rustls::ServerConfig::builder_with_provider(provider())
         .with_protocol_versions(&[&rustls::version::TLS13])
         .context("TLS versiyasi")?
@@ -53,7 +69,7 @@ pub fn server_config_alpn(identity: &HostIdentity, alpn: &[u8], max_bidi: u32) -
     tls.alpn_protocols = vec![alpn.to_vec()];
     let crypto = quinn::crypto::rustls::QuicServerConfig::try_from(tls).context("QUIC server sozlamasi")?;
     let mut cfg = quinn::ServerConfig::with_crypto(Arc::new(crypto));
-    cfg.transport_config(transport(max_bidi)?);
+    cfg.transport_config(transport(max_bidi, timing)?);
     Ok(cfg)
 }
 
@@ -101,10 +117,10 @@ impl ServerCertVerifier for CaptureVerifier {
 }
 
 pub fn client_config(seen: SeenCert) -> Result<quinn::ClientConfig> {
-    client_config_alpn(seen, protocol::ALPN, 16)
+    client_config_alpn(seen, protocol::ALPN, 16, Timing::SESSION)
 }
 
-pub fn client_config_alpn(seen: SeenCert, alpn: &[u8], max_bidi: u32) -> Result<quinn::ClientConfig> {
+pub fn client_config_alpn(seen: SeenCert, alpn: &[u8], max_bidi: u32, timing: Timing) -> Result<quinn::ClientConfig> {
     let provider = provider();
     let mut tls = rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_protocol_versions(&[&rustls::version::TLS13])
@@ -115,6 +131,6 @@ pub fn client_config_alpn(seen: SeenCert, alpn: &[u8], max_bidi: u32) -> Result<
     tls.alpn_protocols = vec![alpn.to_vec()];
     let crypto = quinn::crypto::rustls::QuicClientConfig::try_from(tls).context("QUIC klient sozlamasi")?;
     let mut cfg = quinn::ClientConfig::new(Arc::new(crypto));
-    cfg.transport_config(transport(max_bidi)?);
+    cfg.transport_config(transport(max_bidi, timing)?);
     Ok(cfg)
 }

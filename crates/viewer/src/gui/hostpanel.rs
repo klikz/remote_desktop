@@ -24,6 +24,11 @@ pub struct HostPanel {
     message: Option<(bool, String)>,
     fingerprint: Option<String>,
     ip: String,
+    /// Keshlangan holatlar: har kadrda fayl o'qimaslik uchun, tegishli amaldan keyin yangilanadi.
+    pw_set: bool,
+    port_saved: u16,
+    #[cfg(target_os = "linux")]
+    autologin_on: bool,
     #[cfg(windows)]
     win: super::winhost::WinHost,
     #[cfg(target_os = "linux")]
@@ -73,11 +78,8 @@ fn service_state() -> Option<String> {
 
 #[cfg(target_os = "linux")]
 fn service_installed() -> bool {
-    std::process::Command::new("systemctl")
-        .args(["--user", "cat", "remote-desktop-host"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    // `systemctl --user cat` jarayonini ishga tushirish o'rniga xizmat faylining borligi tekshiriladi.
+    super::linuxhost::unit_installed()
 }
 
 #[cfg(target_os = "linux")]
@@ -95,9 +97,10 @@ impl HostPanel {
             .ok()
             .and_then(|d| HostIdentity::load_or_create(&d).ok())
             .map(|id| hexfmt::colon(&id.fingerprint()));
+        let port_saved = paths::read_host_port().unwrap_or(protocol::DEFAULT_PORT);
         HostPanel {
             new_password: String::new(),
-            port_text: paths::read_host_port().unwrap_or(protocol::DEFAULT_PORT).to_string(),
+            port_text: port_saved.to_string(),
             port_msg: None,
             show_new: false,
             last_set: None,
@@ -105,6 +108,10 @@ impl HostPanel {
             message: None,
             fingerprint,
             ip: local_ip(),
+            pw_set: Self::password_is_set(),
+            port_saved,
+            #[cfg(target_os = "linux")]
+            autologin_on: super::linuxhost::autologin_enabled(),
             #[cfg(windows)]
             win: super::winhost::WinHost::new(),
             #[cfg(target_os = "linux")]
@@ -130,6 +137,17 @@ impl HostPanel {
         paths::host_password_file().map(|p| p.exists()).unwrap_or(false)
     }
 
+    /// Fayllardan o'qiladigan holatlarni qayta o'qiydi (o'rnatish, saqlash kabi amallardan keyin).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    fn refresh_cached(&mut self) {
+        self.pw_set = Self::password_is_set();
+        self.port_saved = paths::read_host_port().unwrap_or(protocol::DEFAULT_PORT);
+        #[cfg(target_os = "linux")]
+        {
+            self.autologin_on = super::linuxhost::autologin_enabled();
+        }
+    }
+
     fn save_port(&mut self) {
         let port: u16 = match self.port_text.trim().parse() {
             Ok(p) if p >= 1024 => p,
@@ -146,6 +164,7 @@ impl HostPanel {
             std::fs::write(path, format!("{port}\n"))?;
             Ok(())
         })();
+        self.port_saved = port;
         self.port_msg = Some(match result {
             Ok(()) => {
                 #[cfg(target_os = "linux")]
@@ -182,6 +201,7 @@ impl HostPanel {
             Ok(()) => {
                 self.last_set = Some(pw);
                 self.new_password.clear();
+                self.pw_set = true;
                 #[cfg(target_os = "linux")]
                 let note = if service_state().as_deref().is_some_and(|s| s == "active" || s == "activating") {
                     if restart_service() {
@@ -213,7 +233,8 @@ impl HostPanel {
         }
         #[cfg(target_os = "linux")]
         {
-            let on = self.service_state_cached().as_deref() == Some("active");
+            // Sarlavha har kadrda chiziladi: xizmat holati kamdan-kam (30 s da bir) tekshiriladi.
+            let on = self.service_state_cached(std::time::Duration::from_secs(30)).as_deref() == Some("active");
             return (on, if on { "Host yoqilgan".to_string() } else { "Host o'chiq".to_string() });
         }
         #[cfg(not(any(windows, target_os = "linux")))]
@@ -222,9 +243,10 @@ impl HostPanel {
         }
     }
 
+    /// `systemctl` jarayoni qimmat: natija `max_age` davomida keshlanadi (amaldan keyin `svc = None` bilan yangilanadi).
     #[cfg(target_os = "linux")]
-    fn service_state_cached(&mut self) -> Option<String> {
-        let stale = self.svc.as_ref().map_or(true, |(t, _, _)| t.elapsed() > std::time::Duration::from_secs(3));
+    fn service_state_cached(&mut self, max_age: std::time::Duration) -> Option<String> {
+        let stale = self.svc.as_ref().map_or(true, |(t, _, _)| t.elapsed() > max_age);
         if stale {
             self.svc = Some((std::time::Instant::now(), service_state(), service_installed()));
         }
@@ -254,12 +276,14 @@ impl HostPanel {
             Some(Ok(())) => {
                 self.install_rx = None;
                 self.svc = None;
+                self.refresh_cached();
                 self.host_current = super::linuxhost::installed_is_current();
                 self.svc_msg = Some((true, "Host ishlayapti: ulanishlar qabul qilinadi.".into()));
             }
             Some(Err(e)) => {
                 self.install_rx = None;
                 self.svc = None;
+                self.refresh_cached();
                 self.svc_msg = Some((false, e));
             }
             None => ctx.request_repaint_after(std::time::Duration::from_millis(200)),
@@ -298,7 +322,7 @@ impl HostPanel {
         #[cfg(target_os = "linux")]
         self.poll_install(ui.ctx());
         #[cfg(target_os = "linux")]
-        let svc = self.service_state_cached();
+        let svc = self.service_state_cached(std::time::Duration::from_secs(5));
         #[cfg(target_os = "linux")]
         let svc_installed = self.svc.as_ref().map_or(false, |s| s.2);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -325,14 +349,14 @@ impl HostPanel {
                     {
                         theme::chip(ui, "Host mavjud emas", theme::DIM);
                     }
-                    if Self::password_is_set() {
+                    if self.pw_set {
                         theme::chip(ui, "Kalit o'rnatilgan", theme::GOOD);
                     } else {
                         theme::chip(ui, "Kalit o'rnatilmagan", theme::BAD);
                     }
                 });
                 ui.add_space(8.0);
-                let addr = format!("{}:{}", self.ip, paths::read_host_port().unwrap_or(protocol::DEFAULT_PORT));
+                let addr = format!("{}:{}", self.ip, self.port_saved);
                 ui.horizontal(|ui| {
                     theme::row_label(ui, "Manzil");
                     ui.label(RichText::new(&addr).monospace().size(16.0).strong());
@@ -369,7 +393,7 @@ impl HostPanel {
             #[cfg(target_os = "linux")]
             theme::card(ui, Some("ULANISHGA RUXSAT"), |ui| {
                 let embedded = super::linuxhost::embedded_available();
-                let pw_ok = Self::password_is_set();
+                let pw_ok = self.pw_set;
                 if self.install_rx.is_some() {
                     ui.horizontal(|ui| {
                         ui.add(egui::Spinner::new().size(18.0).color(theme::ACCENT));
@@ -401,7 +425,7 @@ impl HostPanel {
                     theme::hint(ui, "Yoqilsa, Host kompyuter ishga tushganda ham o'zi yonadi.");
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        if super::linuxhost::autologin_enabled() {
+                        if self.autologin_on {
                             theme::chip(ui, "Avtomatik kirish yoqilgan", theme::GOOD);
                         } else {
                             theme::chip(ui, "Avtomatik kirish o'chiq", theme::WARN);
@@ -412,7 +436,7 @@ impl HostPanel {
                             }
                         }
                     });
-                    if !super::linuxhost::autologin_enabled() {
+                    if !self.autologin_on {
                         theme::hint(ui, "Avtomatik kirishsiz kompyuter qayta yonganda hech kim kirmaydi va Host ishga tushmaydi.");
                     }
                     if embedded && !self.host_current {

@@ -174,6 +174,8 @@ async fn receive_video(session: &mut rdcore::client::Session, opts: &Options) ->
     let mut last_pts: Option<u64> = None;
     let mut max_gap_ms = 0u64;
     let mut last_print = Instant::now();
+    // Host kechikishni Viewer javobiga qarab cheklaydi: javob bo'lmasa bir necha kadrdan keyin kutib qoladi.
+    let mut last_feedback = Instant::now();
 
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -200,6 +202,10 @@ async fn receive_video(session: &mut rdcore::client::Session, opts: &Options) ->
         last_pts = Some(frame.pts_us);
         if let Some(f) = file.as_mut() {
             f.write_all(&frame.data)?;
+        }
+        if frame.keyframe || last_feedback.elapsed() >= rdcore::pacing::FEEDBACK_INTERVAL {
+            session.send_feedback(frame.pts_us, 0).await?;
+            last_feedback = Instant::now();
         }
         if last_print.elapsed() >= Duration::from_secs(2) {
             println!("  ... {frames} kadr, {:.1} MB", bytes as f64 / 1e6);

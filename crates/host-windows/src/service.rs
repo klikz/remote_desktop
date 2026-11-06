@@ -8,7 +8,9 @@ use rdcore::{
     auth::Credentials,
     cert::HostIdentity,
     framing::{read_message, write_message},
-    hexfmt, paths,
+    hexfmt,
+    pacing::VideoControl,
+    paths,
     server::{Handler, Host, SessionIo},
 };
 use std::{
@@ -240,6 +242,8 @@ fn make_handler(shared: Arc<Shared>) -> Handler {
 struct Video {
     task: JoinHandle<()>,
     stop: Arc<AtomicBool>,
+    /// Kalit kadr so'rovi va Viewer javobi (`Feedback`) shu orqali kodlagichga yetadi.
+    ctl: Arc<VideoControl>,
 }
 
 impl Video {
@@ -281,6 +285,16 @@ async fn session(mut io: SessionIo, shared: Arc<Shared>) {
                 }
             }
             Ok(Message::Input(ev)) => input::apply(ev),
+            Ok(Message::RequestKeyframe) => {
+                if let Some(v) = &video {
+                    v.ctl.request_keyframe();
+                }
+            }
+            Ok(Message::Feedback { last_pts_us, queue }) => {
+                if let Some(v) = &video {
+                    v.ctl.on_feedback(last_pts_us, queue);
+                }
+            }
             Ok(Message::Bye { .. }) | Err(_) => break,
             Ok(_) => {}
         }
@@ -296,12 +310,14 @@ async fn session(mut io: SessionIo, shared: Arc<Shared>) {
 
 fn start_video(io: &SessionIo, fps: u16, kbps: u32, max_height: u16) -> Video {
     let stop = Arc::new(AtomicBool::new(false));
+    let ctl = Arc::new(VideoControl::new(u32::from(fps)));
     let conn = io.conn.clone();
     let stop2 = stop.clone();
+    let ctl2 = ctl.clone();
     let task = tokio::spawn(async move {
         let (tx, mut rx) = mpsc::channel::<video::EncodedFrame>(8);
         let (etx, mut erx) = mpsc::unbounded_channel::<String>();
-        let thread = video::spawn(u32::from(fps), kbps, u32::from(max_height), tx, stop2.clone(), etx);
+        let thread = video::spawn(u32::from(fps), kbps, u32::from(max_height), tx, stop2.clone(), etx, ctl2.clone());
 
         let mut stream = match conn.open_uni().await {
             Ok(s) => s,
@@ -311,16 +327,24 @@ fn start_video(io: &SessionIo, fps: u16, kbps: u32, max_height: u16) -> Video {
                 return;
             }
         };
+        // Video fayl uzatishdan ustun: katta fayl yuklanayotganda ham ekran qotmaydi.
+        let _ = stream.set_priority(10);
         let mut sent: u64 = 0;
+        let mut keyframes: u64 = 0;
+        let mut rtt_tick = tokio::time::interval(Duration::from_millis(100));
+        rtt_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
+                _ = rtt_tick.tick() => ctl2.set_rtt(conn.rtt()),
                 frame = rx.recv() => {
                     let Some(f) = frame else { break };
                     let header = VideoHeader { keyframe: f.keyframe, pts_us: f.pts_us, len: f.data.len() as u32 }.encode();
                     if stream.write_all(&header).await.is_err() || stream.write_all(&f.data).await.is_err() {
                         break; // Viewer uzildi
                     }
+                    ctl2.on_sent(f.pts_us);
                     sent += 1;
+                    keyframes += u64::from(f.keyframe);
                 }
                 err = erx.recv() => {
                     if let Some(m) = err {
@@ -332,8 +356,9 @@ fn start_video(io: &SessionIo, fps: u16, kbps: u32, max_height: u16) -> Video {
         }
         stop2.store(true, Ordering::Relaxed);
         let _ = stream.finish();
-        let _ = thread.join();
-        println!("[host] video to'xtadi ({sent} kadr yuborildi)");
+        // Kodlash oqimi tugashini tokio ishchisini bloklamasdan kutamiz
+        let _ = tokio::task::spawn_blocking(move || thread.join()).await;
+        println!("[host] video to'xtadi ({sent} kadr yuborildi, {keyframes} kalit kadr)");
     });
-    Video { task, stop }
+    Video { task, stop, ctl }
 }

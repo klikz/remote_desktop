@@ -260,6 +260,27 @@ end-to-end qoladi (server trafikni o'qiy olmaydi): server faqat ikki clientning 
 Qoldiq xavf: dialogli rejimda bir martalik parol server orqali o'tadi, shuning uchun serverga ishonish kerak (qarovsiz rejimda parol
 serverga hech qachon yuborilmaydi). Host fingerprint'i `id:<ID>` kaliti bilan birinchi ulanishda pin qilinadi.
 
+### Bosqich 11. Audit: trafik, aloqa va CPU (2026-11-06)
+To'liq audit va reja: trafik isrofi (har soniyada IDR, o'zgarmagan ekranni kodlash, CBR), aloqa (ping kiritishni to'xtatardi,
+kechikish chegarasiz, tirbandlikda IDR, relay'da QUIC ichida QUIC) va CPU (bo'sh holatda UI har 500 ms da chizilardi, Linux'da
+har 3 s da `systemctl`, rang o'girish protsessorda). Protokol v2 (`PROTOCOL_VERSION = 2`): eski versiyalar bilan moslik yo'q.
+- [~] Protokol: `RequestKeyframe`, `Feedback { last_pts_us, queue }`; `rdcore::pacing` (Host: `VideoControl`, Viewer: `ViewerFeedback`)
+- [~] Kalit kadr faqat boshida va so'ralganda (uzoq GOP); Viewer dekoder xatosi/kadr tashlanganda so'raydi (300 ms da ko'pi bilan bir, 1 s da qayta)
+- [~] Kechikish chegarasi: yo'ldagi kadrlar > FPS x (RTT + 50 ms + 150 ms) yoki Viewer navbati >= 4 bo'lsa Host kodlagichdan **oldin** kadrni o'tkazib yuboradi
+- [~] Linux pipeline: `videorate drop-only=true` (takroriy kadr yo'q), masshtab rang o'girishdan oldin, `videoconvert n-threads=4`, `queue leaky` kodlagich oldida, `appsink drop=false` (kodlangan kadr tashlanmaydi); `RD_GPU_CONVERT=1` (tajriba: cuda/va)
+- [~] Kodlagich: VBR/sifat rejimi birinchi variant (x264 `pass=qual quantizer=20`, nvh264enc `rc-mode=vbr`, vah264enc `rate-control=vbr`), yaroqsiz bo'lsa eski sozlama
+- [~] Windows Host: o'zgarmagan ekran kodlanmaydi (1 s dan keyin yarim tezlikda tekshiriladi), tirbandlikda IDR o'rniga kodlamaslik, `enable_skip_frame(true)`, masshtabsiz holatda nusxa yo'q
+- [~] Ping olib tashlandi (GUI/mobil): RTT `conn.rtt()`, uzilish QUIC idle timeout (sessiya 20 s); kiritish alohida kanalda, ketma-ket harakatlar birlashtirilib bitta yozuvda
+- [~] Video oqimi ustuvorligi 10, fayl oqimlari -10
+- [~] UI hodisaga asoslangan: agent uyg'otuvchisi (`Agent::set_waker`), doimiy 500 ms qayta chizish yo'q; Linux xizmat holati keshlanadi (sarlavha 30 s, bo'lim 5 s), `systemctl cat` o'rniga unit fayli tekshiriladi, fayl holatlari keshlanadi
+- [~] Desktop Viewer: YUV -> RGBA dekoder oqimida (butun sonli, parallel), UI faqat teksturani yuklaydi
+- [~] Mobil: kadr Rust'dan MediaCodec buferiga bir marta ko'chiriladi (`waitFrame`/`copyFrame`), dekoder xatoda qayta yaratiladi, kalit kadr so'raladi
+- [~] Linux Host: ketma-ket sichqoncha harakatlari portal/Mutter'ga bitta D-Bus chaqiruvi bilan; relay agent keepalive 15 s; `RD_CC=bbr` (tajriba)
+- [ ] Sinov: bo'sh holatda CPU (oyna ochiq / yig'ilgan / trayda), 3 ssenariy trafigi (bo'sh, aylantirish, video), `netem delay 80ms loss 1% rate 4mbit`, fayl + video
+- [ ] Moslashuvchan bitrate (ABR) va `VideoSettings` (qayta ulanmasdan sifat/o'lcham), avtomatik o'lcham (oyna/telefon ekraniga qarab)
+- [ ] Relay: QUIC DATAGRAM orqali (ichki MTU 1200), desktop'da avtomatik qayta ulanish (umumiy sessiya moduli), bitta tokio runtime
+- [ ] Keyinroq: DXGI + Media Foundation (Windows Host), GPU'da YUV ko'rsatish / apparat dekodlash, kursorni videodan ajratish, UDP hole punching
+
 ## 6. Xavfsizlik talablari
 
 - [ ] Barcha trafik shifrlangan
@@ -323,3 +344,4 @@ serverga hech qachon yuborilmaydi). Host fingerprint'i `id:<ID>` kaliti bilan bi
 | 2026-10-30 | Bosqich 10: server (relay) rejimi: `rdcore::relay` (server, agent, registry), bir martalik parol, UI "Server orqali", firewall; rdcore testlari o'tdi, haqiqiy qurilmalarda sinov kutilmoqda |
 | 2026-10-31 | UI: "Ulanish" -> "P2P", server rejimi "HOST" bo'limiga ko'chdi; server kaliti ixtiyoriy (ochiq server himoyasi: IP bo'yicha yangi ID cheklovi, noto'g'ri ID urinishlari bloki); rdcore testlari o'tdi |
 | 2026-10-31 | Qarovsiz rejim: alohida parol (`unattended.key`, xesh) va talab bo'yicha Host (Windows: jarayon ichida loopback, Linux: o'rnatilgan binar `--password-file`); Host yoqilmagan bo'lsa ham ishlaydi. Windows tray ikonkasi (oyna yopilsa/pastga tushsa agent ishlashda qoladi). Linux tray hali yo'q; rdcore testlari o'tdi, qurilmada sinov kutilmoqda |
+| 2026-11-06 | Bosqich 11: audit (trafik, aloqa, CPU). Protokol v2 (kalit kadr so'rovi, Feedback, kechikish chegarasi), Linux/Windows Host kodlash tuzatishlari, ping o'rniga QUIC RTT, kiritishni birlashtirish, hodisaga asoslangan UI, mobil dekoder. `cargo test` (protocol, rdcore, viewer) va Linux uchun `cargo check` o'tdi, Android APK yig'ildi; qurilmalarda sinov kutilmoqda |

@@ -253,6 +253,10 @@ pub struct RelayPanel {
     server_error: Option<String>,
     fw_rx: Option<mpsc::Receiver<Result<String, String>>>,
     fw_msg: Option<(bool, String)>,
+    /// UI konteksti (birinchi `poll` da olinadi): agent hodisa kelganda oynani shu orqali uyg'otadi.
+    ctx: Option<egui::Context>,
+    /// Joriy agentga uyg'otuvchi o'rnatilganmi.
+    waker_set: bool,
 }
 
 impl RelayPanel {
@@ -284,6 +288,8 @@ impl RelayPanel {
             server_error: None,
             fw_rx: None,
             fw_msg: None,
+            ctx: None,
+            waker_set: false,
         };
         if p.server_on {
             p.start_server();
@@ -365,6 +371,8 @@ impl RelayPanel {
             ensure_host: Some(self.ondemand.ensure_fn()),
         };
         self.agent = Some(Agent::start(cfg, policy));
+        self.waker_set = false;
+        self.install_waker();
         self.status = "ulanilmoqda...".into();
         self.subscribe();
     }
@@ -392,8 +400,32 @@ impl RelayPanel {
         }
     }
 
+    /// Agent hodisa yuborganda UI qayta chiziladi (davriy so'rash yo'q: bo'sh turganda CPU sarflanmaydi).
+    /// Kiruvchi so'rovda oyna yashirin bo'lsa ham ochiladi (30 soniyada javob berish uchun).
+    fn install_waker(&mut self) {
+        if self.waker_set {
+            return;
+        }
+        let (Some(agent), Some(ctx)) = (&self.agent, &self.ctx) else { return };
+        let ctx = ctx.clone();
+        agent.set_waker(std::sync::Arc::new(move |e: &AgentEvent| {
+            #[cfg(windows)]
+            if matches!(e, AgentEvent::Incoming { .. }) {
+                super::tray::show_window();
+            }
+            #[cfg(not(windows))]
+            let _ = e;
+            ctx.request_repaint();
+        }));
+        self.waker_set = true;
+    }
+
     /// Har kadrda chaqiriladi: agent hodisalari, firewall natijasi, javob muddati.
     pub fn poll(&mut self, ctx: &egui::Context) {
+        if self.ctx.is_none() {
+            self.ctx = Some(ctx.clone());
+        }
+        self.install_waker();
         let mut events = vec![];
         if let Some(a) = &self.agent {
             while let Some(e) = a.try_event() {
@@ -435,7 +467,8 @@ impl RelayPanel {
                 self.fw_rx = None;
             }
         }
-        if self.agent.is_some() || self.server.is_some() || self.fw_rx.is_some() {
+        // Firewall natijasi alohida oqimdan keladi (kamdan-kam, qisqa muddat).
+        if self.fw_rx.is_some() {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
     }
@@ -811,6 +844,8 @@ impl RelayPanel {
                 }
                 ui.add_space(6.0);
                 ui.label(theme::dim("Ulangan clientlar"));
+                // Ro'yxat faqat shu bo'lim ochiq turganda yangilanadi
+                ui.ctx().request_repaint_after(Duration::from_secs(2));
                 let clients = s.handle.clients();
                 if clients.is_empty() {
                     theme::hint(ui, "Hozircha hech kim ro'yxatdan o'tmagan.");
@@ -887,7 +922,8 @@ impl RelayPanel {
                     }
                 });
             });
-        ctx.request_repaint_after(Duration::from_millis(500));
+        // Sanoq va avtomatik rad etish uchun (faqat so'rov ochiq turganda)
+        ctx.request_repaint_after(Duration::from_secs(1));
         if let Some((yes, always)) = answer {
             self.incoming.pop_front();
             if yes && always && !self.trusted.contains(&from) {

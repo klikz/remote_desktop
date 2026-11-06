@@ -147,7 +147,10 @@ impl WinHost {
                     });
                 }
             }
-            ui.ctx().request_repaint_after(Duration::from_secs(1));
+            // Ulanish vaqti sanog'i uchun: faqat kimdir ulangan bo'lsa
+            if !peers.is_empty() {
+                ui.ctx().request_repaint_after(Duration::from_secs(1));
+            }
         }
         if let (Some(id), Some(h)) = (kick, &self.host) {
             h.kick(id);
