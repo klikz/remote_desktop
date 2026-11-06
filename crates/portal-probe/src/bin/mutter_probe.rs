@@ -35,7 +35,7 @@ mod imp {
         time::{Duration, Instant},
     };
     use zbus::{
-        zvariant::{ObjectPath, OwnedObjectPath, Value},
+        zvariant::{OwnedObjectPath, Value},
         Connection, Proxy,
     };
 
@@ -135,7 +135,8 @@ mod imp {
             gst = Some(child);
         }
 
-        let stream_p = ObjectPath::try_from(stream_path.as_str())?;
+        // Mutter imzosi `sdd`: oqim yo'li ObjectPath ('o') emas, oddiy satr ('s') sifatida yuboriladi.
+        let stream_p: &str = stream_path.as_str();
         let start = Instant::now();
         let mut locked = false;
         let mut first_err: Option<u64> = None;
@@ -151,7 +152,7 @@ mod imp {
             }
             // Mutlaq harakat: oqim obyekti yo'li bilan; keyin 1 px nisbiy
             let a: zbus::Result<()> = rd_session
-                .call("NotifyPointerMotionAbsolute", &(&stream_p, 100.0f64, 100.0f64))
+                .call("NotifyPointerMotionAbsolute", &(stream_p, 100.0f64, 100.0f64))
                 .await;
             let b: zbus::Result<()> = rd_session.call("NotifyPointerMotionRelative", &(1.0f64, 0.0f64)).await;
             match (a, b) {
