@@ -2,104 +2,189 @@ package com.remotedesktop.mobile
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
-import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.Toast
+import android.widget.ScrollView
+import android.widget.TextView
+import org.json.JSONObject
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 
-/** Dialog mazmuni (PC versiyadagi `welcome.rs` bilan bir xil). Keyinchalik URL'dan olinadi: faqat shu obyektni almashtirish kifoya. */
-object WelcomeInfo {
-    /** Mazmun olinadigan manzil (hozircha belgilanmagan: o'rnatilgan matn ishlatiladi). */
-    const val INFO_URL: String = ""
+/**
+ * Ochilish dialogi (PC versiyadagi `welcome.rs` bilan bir xil): to'lov ma'lumoti (text, phone, card) va reklama
+ * (rasm + matn). Mazmun har ochilishda serverdan olinadi; oxirgi muvaffaqiyatli javob saqlanadi va aloqa
+ * bo'lmaganda shu kesh ko'rsatiladi.
+ */
+private const val API = "http://cloud.hubnode.uz:8780/api/public"
+private const val TIMEOUT_MS = 6000
+private const val MAX_IMAGE_BYTES = 10 * 1024 * 1024
+private const val MAX_IMAGE_SIDE = 1080
+private const val BANNER_FILE = "welcome_banner.bin"
 
-    val line1 = "MS Remote: boshqa kompyuterni uzoqdan, tez va xavfsiz boshqaring."
-    val line2 = "Shifrlangan QUIC ulanishi, ID orqali yoki to'g'ridan-to'g'ri (P2P) ulanish. Bepul va ochiq."
-
-    /** Donat uchun kartalar: (nomi, raqami). */
-    val cards = listOf("Humo" to "9860176619947672", "Visa" to "4023060145526470")
+private data class WelcomeData(val text: String, val phone: String, val card: String, val adText: String) {
+    val hasText get() = listOf(text, phone, card, adText).any { it.isNotEmpty() }
 }
 
-private fun spaced(n: String) = n.chunked(4).joinToString(" ")
+private fun Context.prefs() = getSharedPreferences("welcome", Context.MODE_PRIVATE)
 
-/** Ilova ochilganda: rasm, dastur haqida ikki qator va donat uchun karta raqamlari. */
+private fun Context.loadCache(): WelcomeData = prefs().let {
+    WelcomeData(it.getString("text", "") ?: "", it.getString("phone", "") ?: "", it.getString("card", "") ?: "", it.getString("adText", "") ?: "")
+}
+
+private fun Context.saveCache(d: WelcomeData) {
+    prefs().edit().putString("text", d.text).putString("phone", d.phone).putString("card", d.card).putString("adText", d.adText).apply()
+}
+
+/** HTTP GET: faqat 200 javob tanasini qaytaradi (xato bo'lsa null). */
+private fun httpGet(path: String, limit: Int): ByteArray? = try {
+    val c = URL("$API$path").openConnection() as HttpURLConnection
+    c.connectTimeout = TIMEOUT_MS
+    c.readTimeout = TIMEOUT_MS
+    try {
+        if (c.responseCode != 200) null else c.inputStream.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(16 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                out.write(buf, 0, n)
+                if (out.size() > limit) return null
+            }
+            out.toByteArray()
+        }
+    } finally {
+        c.disconnect()
+    }
+} catch (e: Exception) {
+    null
+}
+
+/** `"result" == "ok"` bo'lgan JSON. */
+private fun getJson(path: String): JSONObject? {
+    val body = httpGet(path, 256 * 1024) ?: return null
+    return try {
+        JSONObject(String(body, Charsets.UTF_8)).takeIf { it.optString("result") == "ok" }
+    } catch (e: Exception) {
+        null
+    }
+}
+
+private fun JSONObject.str(k: String): String = if (isNull(k)) "" else optString(k, "").trim()
+
+/** Rasmni o'lchami bo'yicha kichraytirib dekodlaydi (katta rasm xotirani to'ldirmasin). */
+private fun decodeBanner(bytes: ByteArray): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_IMAGE_SIDE) sample *= 2
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+}
+
+/** Faqat raqamlardan iborat bo'lsa 4 tadan guruhlaydi. */
+private fun spaced(n: String) = if (n.isNotEmpty() && n.all(Char::isDigit)) n.chunked(4).joinToString(" ") else n
+
+/** Ilova ochilganda: text, phone, card, reklama rasmi va reklama matni. */
 fun Activity.showWelcome() {
-    val radius = dp(16).toFloat()
-    val banner = FrameLayout(this).apply {
-        background = GradientDrawable(
-            GradientDrawable.Orientation.TL_BR,
-            intArrayOf(0xFF3454D6.toInt(), 0xFF8A46D2.toInt()),
-        )
-        // Yarim shaffof doiralar
-        fun bubble(sizeDp: Int, gravity: Int, alpha: Int, mx: Int, my: Int) = addView(
-            android.view.View(context).apply {
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor((alpha shl 24) or 0xFFFFFF)
-                }
-            },
-            FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), gravity).apply {
-                setMargins(dp(mx), dp(my), dp(mx), dp(my))
-            },
-        )
-        bubble(90, Gravity.TOP or Gravity.START, 0x28, 10, 12)
-        bubble(60, Gravity.TOP or Gravity.END, 0x22, 24, 10)
-        bubble(110, Gravity.BOTTOM or Gravity.END, 0x1C, 0, 0)
-        bubble(46, Gravity.BOTTOM or Gravity.START, 0x1E, 30, 8)
-        addView(
-            ImageView(context).apply { setImageResource(R.mipmap.ic_launcher) },
-            FrameLayout.LayoutParams(dp(96), dp(96), Gravity.CENTER),
-        )
-    }
+    val bannerFile = File(filesDir, BANNER_FILE)
+    var data = loadCache()
+    var banner: Bitmap? = if (bannerFile.exists()) runCatching { decodeBanner(bannerFile.readBytes()) }.getOrNull() else null
 
-    fun copy(number: String) {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("karta", number))
-        Toast.makeText(this, "Nusxalandi", Toast.LENGTH_SHORT).show()
+    // --- ko'rinishlar
+    val textView = label("", 16f, bold = true)
+    fun mono() = label("", 15f).apply { typeface = android.graphics.Typeface.MONOSPACE }
+    val phoneView = mono()
+    val cardView = mono()
+    val phoneRow: View = phoneView
+    val cardRow: View = cardView
+    val maxImageH = (resources.displayMetrics.heightPixels * 0.45).toInt()
+    val imageView = ImageView(this).apply {
+        adjustViewBounds = true
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        maxHeight = maxImageH
+        background = rounded(Colors.BG, 12)
+        clipToOutline = true
+        outlineProvider = ViewOutlineProvider.BACKGROUND
     }
+    val adView = label("", 14f)
 
     val body = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(18), dp(14), dp(18), dp(16))
-        addView(label(WelcomeInfo.line1, 16f, bold = true))
-        addView(label(WelcomeInfo.line2, 13f, Colors.DIM), lp(top = 6))
-        addView(label("Loyihani qo'llab-quvvatlash (donat) uchun karta raqamlari:", 13f), lp(top = 12))
-        for ((name, number) in WelcomeInfo.cards) {
-            val row = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(label("$name:", 14f, bold = true))
-                addView(
-                    label(spaced(number), 15f).apply { typeface = android.graphics.Typeface.MONOSPACE },
-                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(8) },
-                )
-                addView(button("Nusxa") { copy(number) })
-            }
-            addView(row, lp(top = 6))
-        }
+        setPadding(dp(18), dp(18), dp(18), dp(8))
+        addView(textView)
+        addView(phoneRow, lp(top = 10))
+        addView(cardRow, lp(top = 6))
+        addView(
+            imageView,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(14)
+                gravity = Gravity.CENTER_HORIZONTAL
+            },
+        )
+        addView(adView, lp(top = 10))
     }
 
-    val content = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
+    fun render() {
+        fun set(v: TextView, row: View, value: String, shown: String = value) {
+            v.text = shown
+            v.tag = value
+            row.visibility = if (value.isEmpty()) View.GONE else View.VISIBLE
+        }
+        set(textView, textView, data.text)
+        set(phoneView, phoneRow, data.phone)
+        set(cardView, cardRow, data.card, spaced(data.card))
+        set(adView, adView, data.adText)
+        imageView.setImageBitmap(banner)
+        imageView.visibility = if (banner == null) View.GONE else View.VISIBLE
+    }
+    render()
+
+    // Hammasi (tugma ham) ScrollView ichida: rasm katta bo'lsa ham tugmaga yetib borish mumkin
+    val content = ScrollView(this).apply {
         background = rounded(Colors.CARD, 16)
         clipToOutline = true
         outlineProvider = ViewOutlineProvider.BACKGROUND
-        addView(banner, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150)))
         addView(body)
     }
-
     val dialog = AlertDialog.Builder(this).setView(content).create()
-    content.addView(
+    body.addView(
         button("Davom etish", filled = true) { dialog.dismiss() },
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            .apply { setMargins(dp(18), 0, dp(18), dp(18)) },
+            .apply { setMargins(0, dp(14), 0, dp(10)) },
     )
-    dialog.window?.setBackgroundDrawable(GradientDrawable().apply { setColor(0); cornerRadius = radius })
-    dialog.show()
+    dialog.window?.setBackgroundDrawable(GradientDrawable().apply { setColor(0); cornerRadius = dp(16).toFloat() })
+
+    // Kesh bo'lsa darhol ko'rsatiladi; bo'lmasa ma'lumot kelgach (hech narsa kelmasa umuman chiqmaydi).
+    fun showIfReady() {
+        if (!dialog.isShowing && !isFinishing && (data.hasText || banner != null)) dialog.show()
+    }
+    showIfReady()
+
+    Thread {
+        val pay = getJson("/payment-info")
+        val ad = getJson("/ad-text")
+        val bytes = httpGet("/banner-image", MAX_IMAGE_BYTES)
+        val bmp = bytes?.let { runCatching { decodeBanner(it) }.getOrNull() }
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            if (pay != null) data = data.copy(text = pay.str("text"), phone = pay.str("phone"), card = pay.str("card"))
+            if (ad != null) data = data.copy(adText = ad.str("text"))
+            if (pay != null || ad != null) saveCache(data)
+            if (bmp != null) {
+                banner = bmp
+                runCatching { bannerFile.writeBytes(bytes!!) }
+            }
+            render()
+            showIfReady()
+        }
+    }.start()
 }

@@ -5,7 +5,7 @@ use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 use protocol::{video_reason, InputEvent, DEFAULT_PORT};
 use rdcore::{
-    client::{connect_relayed, connect_with, ConnectOptions, Transport, VideoRefused},
+    client::{connect_relayed, connect_with, ConnectOptions, Rejected, Transport, VideoRefused},
     filexfer,
     known_hosts::KnownHosts,
     pacing::{ViewerFeedback, FEEDBACK_INTERVAL},
@@ -58,6 +58,8 @@ pub enum Event {
     VideoStarted,
     /// Host ekranni ola olmadi (xato matni). Ulanish ochiq: ruxsatni qaytadan berish mumkin.
     VideoRefused(String),
+    /// Aloqa uzildi, avtomatik qayta ulanilmoqda (`attempt` 1 dan boshlanadi; `reason` = uzilish sababi).
+    Reconnecting { attempt: u32, reason: String },
     /// Ulanish tugadi. `Some` = xato matni.
     Ended(Option<String>),
     /// Host'dagi almashinuv papkasi ro'yxati.
@@ -210,6 +212,50 @@ async fn resolve(target: &str) -> Result<SocketAddr> {
     first.with_context(|| format!("{target} uchun manzil topilmadi"))
 }
 
+/// Sessiya video bilan ochilgandan keyin aloqa uzilsa, shu vaqt ichida avtomatik qayta ulanishga uriniladi.
+const RECONNECT_WINDOW: Duration = Duration::from_secs(90);
+
+/// Bitta ulanish urinishi qanday tugadi.
+enum End {
+    /// Foydalanuvchi yopdi.
+    Closed,
+    /// Qayta urinish befoyda (Host ataylab yopdi, ruxsat berilmadi ...).
+    Fatal(String),
+    /// Tarmoq uzildi: qayta ulanish mumkin.
+    Lost(String),
+}
+
+/// Relay serveri rad etdi: vaqtincha sabablar (kompyuter oflayn, agent qayta ulanmoqda, javob kelmadi) qayta uriniladi;
+/// qolganlari ("ruxsat berilmadi", "bunday ID yo'q" ...) doimiy.
+fn relay_retryable(text: &str) -> bool {
+    ["oflayn", "aloqa yo'q", "vaqt tugadi", "oqim ochilmadi"].iter().any(|k| text.contains(k))
+}
+
+/// Qayta urinishdan oldingi kutish. `true` = foydalanuvchi yopdi.
+async fn wait_or_close(cmd_rx: &mut UnboundedReceiver<Cmd>, dur: Duration) -> bool {
+    let sleep = tokio::time::sleep(dur);
+    tokio::pin!(sleep);
+    loop {
+        tokio::select! {
+            _ = &mut sleep => return false,
+            c = cmd_rx.recv() => match c {
+                Some(Cmd::Close) | None => return true,
+                Some(_) => {}
+            },
+        }
+    }
+}
+
+/// Ulanish ochilguncha foydalanuvchi "Bekor qilish" bosishini kutadi (boshqa buyruqlar tashlanadi).
+async fn wait_close(cmd_rx: &mut UnboundedReceiver<Cmd>) {
+    loop {
+        match cmd_rx.recv().await {
+            Some(Cmd::Close) | None => return,
+            Some(_) => {}
+        }
+    }
+}
+
 async fn run(
     p: Params,
     ctx: egui::Context,
@@ -232,71 +278,10 @@ async fn run(
         rx.recv().unwrap_or(false)
     };
 
-    let mut session = match &p.relay {
-        Some((id, connector)) => {
-            // Server qabul qiluvchidan ruxsat so'raydi (u 30 soniya o'ylaydi). Parol kiritilmagan bo'lsa
-            // qarovsiz kompyuter ham ruxsat oynasini ko'rsatadi va bir martalik parol beradi.
-            let relayed = connector
-                .connect_ask(id, p.password.is_empty())
-                .await
-                .map_err(|_| anyhow::anyhow!("relay agenti to'xtagan"))?
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let password = relayed.pw.clone().unwrap_or_else(|| p.password.clone());
-            if password.is_empty() {
-                anyhow::bail!("Host kalit bermadi: kalitni kiriting");
-            }
-            connect_relayed(
-                ConnectOptions { addr: relayed.local, password: &password, known_hosts: &known_hosts, confirm_new_host: &confirm },
-                format!("id:{id}"),
-            )
-            .await?
-        }
-        None => {
-            let addr = resolve(&p.addr).await?;
-            connect_with(
-                ConnectOptions { addr, password: &p.password, known_hosts: &known_hosts, confirm_new_host: &confirm },
-                p.transport,
-            )
-            .await?
-        }
-    };
-    let _ = ev_tx.send(Event::Connected { fingerprint: session.fingerprint.clone(), via_tcp: session.via_tcp });
-    ctx.request_repaint();
-
-    // Host ekranni ola olmasa (ruxsat yo'q yoki noto'g'ri berilgan) ulanish uzilmaydi: foydalanuvchi
-    // ruxsatni bekor qilib qaytadan berishi (yoki bekor qilishi) mumkin.
-    let mut stream = loop {
-        match session.request_video(p.fps, p.kbps, p.height, 0).await {
-            Ok(s) => break s,
-            Err(e) if e.downcast_ref::<VideoRefused>().map_or(false, |v| v.0 == video_reason::NO_CAPTURE) => {
-                let _ = ev_tx.send(Event::VideoRefused(format!("{e:#}")));
-                ctx.request_repaint();
-                loop {
-                    match cmd_rx.recv().await {
-                        Some(Cmd::ResetPermissions) => {
-                            session.reset_permissions().await?;
-                            break;
-                        }
-                        Some(Cmd::ListFiles | Cmd::SendFile(..) | Cmd::GetFile(..)) => {}
-                        Some(Cmd::Close) | None => {
-                            session.close().await;
-                            return Ok(None);
-                        }
-                    }
-                }
-            }
-            Err(e) => return Err(e),
-        }
-    };
-    let _ = ev_tx.send(Event::VideoStarted);
-    ctx.request_repaint();
-
-    // Video kutilayotganda bosilgan tugmalar Host'ga yuborilmaydi (eskirgan hodisalar).
-    while input_rx.try_recv().is_ok() {}
     let fb = Arc::new(ViewerFeedback::default());
 
-    // Dekoder oqimi: eng yangi kadr `shared.picture` ga yoziladi. Xato bo'lsa keyingi kalit kadrgacha kadrlar
-    // tashlanadi va Host'dan kalit kadr so'raladi (Host kalit kadrni faqat so'ralganda yuboradi).
+    // Dekoder oqimi (qayta ulanishlarda ham bitta): eng yangi kadr `shared.picture` ga yoziladi. Xato bo'lsa keyingi
+    // kalit kadrgacha kadrlar tashlanadi va Host'dan kalit kadr so'raladi (Host kalit kadrni faqat so'ralganda yuboradi).
     let (ftx, frx) = mpsc::sync_channel::<Vec<u8>>(8);
     {
         let shared = shared.clone();
@@ -330,10 +315,133 @@ async fn run(
         });
     }
 
+    // `ever`: sessiya kamida bir marta to'liq (video bilan) ochilgan; faqat shundan keyin qayta uriniladi.
+    let mut ever = false;
+    let mut deadline: Option<Instant> = None;
+    let mut attempt = 0u32;
+    loop {
+        let mut up = false;
+        let res = run_once(&p, &ctx, &shared, &ev_tx, &confirm, &known_hosts, &ftx, &fb, &mut cmd_rx, &mut input_rx, &mut up).await;
+        if up {
+            ever = true;
+            deadline = None;
+            attempt = 0;
+        }
+        let end = match res {
+            Ok(end) => end,
+            // Kalit rad etildi / fingerprint o'zgargan / Host videoni rad etdi: qayta urinish befoyda.
+            Err(e) if e.downcast_ref::<Rejected>().is_some() || e.downcast_ref::<VideoRefused>().is_some() => return Err(e),
+            Err(e) if ever => End::Lost(format!("{e:#}")),
+            Err(e) => return Err(e),
+        };
+        let reason = match end {
+            End::Closed => return Ok(None),
+            End::Fatal(m) => return Ok(Some(m)),
+            End::Lost(m) => m,
+        };
+        if !ever {
+            return Ok(Some(reason));
+        }
+        let deadline = *deadline.get_or_insert_with(|| Instant::now() + RECONNECT_WINDOW);
+        if Instant::now() >= deadline {
+            return Ok(Some(format!("{reason} (qayta ulanib bo'lmadi)")));
+        }
+        attempt += 1;
+        let _ = ev_tx.send(Event::Reconnecting { attempt, reason });
+        ctx.request_repaint();
+        // 1, 2, 4, 8, 15, 15 ... soniya
+        let wait = Duration::from_secs((1u64 << (attempt - 1).min(4)).min(15));
+        if wait_or_close(&mut cmd_rx, wait).await {
+            return Ok(None);
+        }
+    }
+}
+
+/// Bitta ulanish urinishi: ulanadi, video so'raydi va uzilguncha ishlaydi. `up` = video boshlandi.
+#[allow(clippy::too_many_arguments)]
+async fn run_once(
+    p: &Params,
+    ctx: &egui::Context,
+    shared: &Arc<Shared>,
+    ev_tx: &mpsc::Sender<Event>,
+    confirm: &(dyn Fn(&str) -> bool + Sync),
+    known_hosts: &KnownHosts,
+    ftx: &mpsc::SyncSender<Vec<u8>>,
+    fb: &Arc<ViewerFeedback>,
+    cmd_rx: &mut UnboundedReceiver<Cmd>,
+    input_rx: &mut UnboundedReceiver<InputEvent>,
+    up: &mut bool,
+) -> Result<End> {
+    let mut session = match &p.relay {
+        Some((id, connector)) => {
+            // Server qabul qiluvchidan ruxsat so'raydi (u 30 soniya o'ylaydi). Parol kiritilmagan bo'lsa
+            // qarovsiz kompyuter ham ruxsat oynasini ko'rsatadi va bir martalik parol beradi.
+            let asked = connector.connect_ask(id, p.password.is_empty());
+            let relayed = tokio::select! {
+                r = asked => match r {
+                    Err(_) => return Ok(End::Lost("relay agenti bilan aloqa uzildi".into())),
+                    Ok(Err(text)) => return Ok(if relay_retryable(&text) { End::Lost(text) } else { End::Fatal(text) }),
+                    Ok(Ok(relayed)) => relayed,
+                },
+                _ = wait_close(cmd_rx) => return Ok(End::Closed),
+            };
+            let password = relayed.pw.clone().unwrap_or_else(|| p.password.clone());
+            if password.is_empty() {
+                return Ok(End::Fatal("Host kalit bermadi: kalitni kiriting".into()));
+            }
+            connect_relayed(
+                ConnectOptions { addr: relayed.local, password: &password, known_hosts, confirm_new_host: confirm },
+                format!("id:{id}"),
+            )
+            .await?
+        }
+        None => {
+            let addr = resolve(&p.addr).await?;
+            connect_with(ConnectOptions { addr, password: &p.password, known_hosts, confirm_new_host: confirm }, p.transport)
+                .await?
+        }
+    };
+    let _ = ev_tx.send(Event::Connected { fingerprint: session.fingerprint.clone(), via_tcp: session.via_tcp });
+    ctx.request_repaint();
+
+    // Host ekranni ola olmasa (ruxsat yo'q yoki noto'g'ri berilgan) ulanish uzilmaydi: foydalanuvchi
+    // ruxsatni bekor qilib qaytadan berishi (yoki bekor qilishi) mumkin.
+    let mut stream = loop {
+        match session.request_video(p.fps, p.kbps, p.height, 0).await {
+            Ok(s) => break s,
+            Err(e) if e.downcast_ref::<VideoRefused>().map_or(false, |v| v.0 == video_reason::NO_CAPTURE) => {
+                let _ = ev_tx.send(Event::VideoRefused(format!("{e:#}")));
+                ctx.request_repaint();
+                loop {
+                    match cmd_rx.recv().await {
+                        Some(Cmd::ResetPermissions) => {
+                            session.reset_permissions().await?;
+                            break;
+                        }
+                        Some(Cmd::ListFiles | Cmd::SendFile(..) | Cmd::GetFile(..)) => {}
+                        Some(Cmd::Close) | None => {
+                            session.close().await;
+                            return Ok(End::Closed);
+                        }
+                    }
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    };
+    let _ = ev_tx.send(Event::VideoStarted);
+    ctx.request_repaint();
+    *up = true;
+
+    // Yangi oqim: eski holat tozalanadi, video kutilayotganda bosilgan tugmalar Host'ga yuborilmaydi.
+    fb.reset();
+    while input_rx.try_recv().is_ok() {}
+
     // Kadrlarni qabul qilish. next_frame() ni timeout/select bilan uzib bo'lmaydi (oqim buziladi),
     // shuning uchun u alohida vazifada ishlaydi va kerak bo'lsa butunlay abort qilinadi.
     let rx_shared = shared.clone();
     let rx_fb = fb.clone();
+    let ftx = ftx.clone();
     let mut recv_task = tokio::spawn(async move {
         loop {
             match stream.next_frame().await {
@@ -368,35 +476,35 @@ async fn run(
     let end = loop {
         tokio::select! {
             ev = input_rx.recv() => {
-                let Some(ev) = ev else { break None };
+                let Some(ev) = ev else { break End::Closed };
                 let mut batch = vec![ev];
                 while let Ok(ev) = input_rx.try_recv() {
                     batch.push(ev);
                 }
                 if let Err(e) = session.send_inputs(batch).await {
-                    break Some(format!("{e:#}"));
+                    break End::Lost(format!("{e:#}"));
                 }
             }
             c = cmd_rx.recv() => match c {
                 Some(Cmd::ResetPermissions) => {
                     if let Err(e) = session.reset_permissions().await {
-                        break Some(format!("{e:#}"));
+                        break End::Lost(format!("{e:#}"));
                     }
                 }
                 Some(c @ (Cmd::ListFiles | Cmd::SendFile(..) | Cmd::GetFile(..))) => {
-                    spawn_file_cmd(session.connection(), &ctx, &ev_tx, c);
+                    spawn_file_cmd(session.connection(), ctx, ev_tx, c);
                 }
-                Some(Cmd::Close) | None => break None,
+                Some(Cmd::Close) | None => break End::Closed,
             },
             _ = tick.tick() => {
                 if let Some((pts, queue)) = fb.take_feedback() {
                     if let Err(e) = session.send_feedback(pts, queue).await {
-                        break Some(format!("{e:#}"));
+                        break End::Lost(format!("{e:#}"));
                     }
                 }
                 if fb.take_keyframe_request() {
                     if let Err(e) = session.request_keyframe().await {
-                        break Some(format!("{e:#}"));
+                        break End::Lost(format!("{e:#}"));
                     }
                 }
                 ticks = ticks.wrapping_add(1);
@@ -404,11 +512,22 @@ async fn run(
                     shared.rtt_us.store(session.rtt().as_micros() as u64, Ordering::Relaxed);
                 }
             }
-            e = &mut closed => break Some(format!("aloqa uzildi: {e}")),
-            r = &mut recv_task => break r.unwrap_or_else(|_| Some("video vazifasi to'xtadi".to_string())),
+            e = &mut closed => break End::Lost(format!("aloqa uzildi: {e}")),
+            r = &mut recv_task => break match r {
+                Ok(None) => End::Closed,
+                // Host videoni o'zi to'xtatdi: qayta ulanish befoyda
+                Ok(Some(m)) if m.starts_with("Host videoni") => End::Fatal(m),
+                Ok(Some(m)) => End::Lost(m),
+                Err(_) => End::Lost("video vazifasi to'xtadi".to_string()),
+            },
         }
     };
     recv_task.abort();
+    // Host ulanishni ataylab yopgan bo'lsa (masalan "Uzish"), qayta ulanmaymiz.
+    let end = match end {
+        End::Lost(m) if session.closed_by_peer() => End::Fatal(format!("{m} (Host ulanishni yopdi)")),
+        e => e,
+    };
     session.close().await;
     Ok(end)
 }

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shifrlanmagan HTTP faqat ochilish dialogi ma'lumotlari serveri uchun ruxsat etiladi; qolgan barcha domenlar uchun yopiq. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">cloud.hubnode.uz</domain>
+    </domain-config>
+</network-security-config>

@@ -49,6 +49,9 @@ const PRESETS: [(&str, u16, u32, u16); 5] = [
     ("Matn · 1440p/20", 20, 20_000, 1440),
     ("Maksimal · asl", 30, 40_000, 0),
 ];
+/// P2P bo'limida (matn maydoni fokusda bo'lmaganda) shu so'z yozilsa, yashirin HOST menyusi bir martaga ko'rinadi.
+const HOST_SECRET: &str = "host123uzb";
+
 const HEIGHTS: [(u16, &str); 5] = [(720, "720p"), (1080, "1080p"), (1440, "1440p"), (2160, "2160p"), (0, "Asl o'lcham")];
 
 /// "SIFAT" kartasi: shablonlar va qo'shimcha sozlamalar (P2P va "Server orqali" uchun umumiy).
@@ -163,6 +166,10 @@ struct App {
     /// Ochilishdagi dialog (yopilgach `None`).
     welcome: Option<welcome::Welcome>,
     tab: Tab,
+    /// Yashirin HOST menyusi hozir ko'rinadimi (boshqa bo'limga o'tilganda yana yashirinadi).
+    host_tab_shown: bool,
+    /// P2P bo'limida yozilgan oxirgi belgilar (`HOST_SECRET` ni aniqlash uchun).
+    typed: String,
     files: Files,
     /// Avtostartda birinchi kadrda oyna yig'iladi.
     start_minimized: bool,
@@ -177,6 +184,8 @@ struct App {
     error: Option<String>,
     /// Host ekranni ola olmadi: ulanish ochiq, ruxsatni qaytadan berish tugmasi ko'rsatiladi.
     refused: Option<String>,
+    /// Aloqa uzildi va avtomatik qayta ulanilmoqda: (urinish, sabab).
+    reconnecting: Option<(u32, String)>,
     handle: Option<session::Handle>,
     confirm: Option<(String, mpsc::Sender<bool>)>,
     fingerprint: String,
@@ -199,6 +208,8 @@ impl App {
         let mut app = App {
             welcome: Some(welcome::Welcome::new(&cc.egui_ctx)),
             tab: Tab::Relay,
+            host_tab_shown: false,
+            typed: String::new(),
             files: Files::default(),
             start_minimized: minimized,
             host: hostpanel::HostPanel::new(),
@@ -222,6 +233,7 @@ impl App {
             },
             error: None,
             refused: None,
+            reconnecting: None,
             handle: None,
             confirm: None,
             fingerprint: String::new(),
@@ -373,6 +385,7 @@ impl App {
         self.handle = None;
         self.confirm = None;
         self.refused = None;
+        self.reconnecting = None;
         self.tex = None;
         self.files = Files::default();
         self.screen = Screen::Form;
@@ -388,16 +401,20 @@ impl App {
                 match ev {
                     session::Event::Confirm(fp, tx) => self.confirm = Some((fp, tx)),
                     session::Event::Connected { fingerprint, via_tcp } => {
-                        if via_tcp {
+                        let reconnect = self.reconnecting.is_some();
+                        if via_tcp && !self.title.ends_with(" [TCP]") {
                             self.title.push_str(" [TCP]");
                         }
                         self.fingerprint = fingerprint;
-                        connected = true;
+                        // qayta ulanishda Host ro'yxati qaytadan saqlanmaydi
+                        connected = !reconnect;
                     }
                     session::Event::VideoStarted => {
                         self.refused = None;
+                        self.reconnecting = None;
                         self.screen = Screen::Viewing;
                     }
+                    session::Event::Reconnecting { attempt, reason } => self.reconnecting = Some((attempt, reason)),
                     session::Event::VideoRefused(msg) => self.refused = Some(msg),
                     session::Event::Files(r) => self.files.remote = Some(r),
                     session::Event::Transfer { id, done, total, result } => {
@@ -449,21 +466,53 @@ impl App {
         }
     }
 
+    /// P2P bo'limida `HOST_SECRET` yozilganini kuzatadi. Matn maydoniga yozilgani hisobga olinmaydi.
+    fn watch_secret(&mut self, ctx: &egui::Context) {
+        if self.tab != Tab::Connect || self.host_tab_shown || ctx.wants_keyboard_input() {
+            return;
+        }
+        let typed: String = ctx.input(|i| {
+            i.events.iter().filter_map(|e| if let egui::Event::Text(t) = e { Some(t.to_lowercase()) } else { None }).collect()
+        });
+        if typed.is_empty() {
+            return;
+        }
+        self.typed.push_str(&typed);
+        let n = self.typed.chars().count();
+        if n > HOST_SECRET.len() {
+            self.typed = self.typed.chars().skip(n - HOST_SECRET.len()).collect();
+        }
+        if self.typed == HOST_SECRET {
+            self.host_tab_shown = true;
+            self.typed.clear();
+        }
+    }
+
     fn ui_form(&mut self, ctx: &egui::Context) {
+        self.watch_secret(ctx);
         let (host_on, host_label) = self.host.header_status();
+        let show_host = self.host_tab_shown || self.tab == Tab::Host;
         egui::TopBottomPanel::top("header").frame(theme::header_frame()).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 theme::dot(ui, theme::ACCENT);
                 ui.label(RichText::new("MS Remote").size(16.0).strong());
                 ui.add_space(14.0);
                 for (t, name) in [(Tab::Relay, "Server orqali"), (Tab::Connect, "P2P"), (Tab::ThisPc, "P2P Sozlash"), (Tab::Host, "HOST")] {
-                    if theme::tab(ui, self.tab == t, name).clicked() {
+                    if t == Tab::Host && !show_host {
+                        continue;
+                    }
+                    if theme::tab(ui, self.tab == t, name).clicked() && self.tab != t {
                         self.tab = t;
+                        self.typed.clear();
+                        // HOST bir martaga ko'rinadi: boshqa bo'limga o'tilganda yana yashirinadi
+                        if t != Tab::Host {
+                            self.host_tab_shown = false;
+                        }
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     theme::chip(ui, host_label, if host_on { theme::GOOD } else { theme::DIM });
-                    if self.relay.server_running() {
+                    if show_host && self.relay.server_running() {
                         theme::chip(ui, "Server: ishlayapti", theme::GOOD);
                     }
                     if self.relay.is_online() {
@@ -622,11 +671,15 @@ impl App {
                 });
                 quality_card(ui, "p2p", &mut self.form.fps, &mut self.form.kbps, &mut self.form.height);
 
+                let can = !self.form.addr.trim().is_empty() && !self.form.password.is_empty();
                 if let Some(e) = &self.error {
                     theme::error_banner(ui, e);
+                    ui.add_space(6.0);
+                    if can && theme::button(ui, "Qayta ulanish").clicked() {
+                        do_connect = true;
+                    }
                     ui.add_space(10.0);
                 }
-                let can = !self.form.addr.trim().is_empty() && !self.form.password.is_empty();
                 if theme::primary_button(ui, "Ulanish", can).clicked() || (pw_enter && can) {
                     do_connect = true;
                 }
@@ -844,6 +897,29 @@ impl App {
             }
         });
 
+        // Aloqa uzildi: oxirgi kadr ustida qayta ulanish holati
+        if let Some((attempt, reason)) = &self.reconnecting {
+            let screen = ctx.screen_rect();
+            ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("reconnect_dim")))
+                .rect_filled(screen, 0.0, Color32::from_black_alpha(160));
+            egui::Area::new(egui::Id::new("reconnect_box")).order(egui::Order::Foreground).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+                theme::card(ui, None, |ui| {
+                    ui.set_max_width(380.0);
+                    ui.vertical_centered(|ui| {
+                        ui.add(egui::Spinner::new().size(28.0).color(theme::ACCENT));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new(format!("Aloqa uzildi. Qayta ulanilmoqda… ({attempt})")).size(16.0).strong());
+                        ui.add_space(4.0);
+                        ui.label(theme::dim(reason));
+                        ui.add_space(10.0);
+                        if ui.add(egui::Button::new("Bekor qilish").min_size(egui::vec2(140.0, 32.0))).clicked() {
+                            want_disconnect = true;
+                        }
+                    });
+                });
+            });
+        }
+
         // Boshqaruv: panel tugmalari klaviatura fokusini olib qolmasin (aks holda Space/Enter ularni bosadi)
         if self.input_on {
             ctx.memory_mut(|m| {
@@ -1028,7 +1104,7 @@ impl eframe::App for App {
             Screen::Viewing => self.ui_viewing(ctx),
         }
         self.ui_confirm(ctx);
-        if self.welcome.as_ref().is_some_and(|w| !w.show(ctx)) {
+        if self.welcome.as_mut().is_some_and(|w| !w.show(ctx)) {
             self.welcome = None;
         }
         self.relay.incoming_dialog(ctx);

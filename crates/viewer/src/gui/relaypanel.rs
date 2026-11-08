@@ -26,6 +26,9 @@ use std::{
 /// Kiruvchi so'rovga javob berish muddati.
 const ANSWER_SECS: u64 = 30;
 
+/// Server manzili kiritilmagan bo'lsa ishlatiladigan standart relay server.
+const DEFAULT_SERVER: &str = "cloud.hubnode.uz:8781";
+
 // ---------------------------------------------------------------------------------------------
 // Fayllar
 // ---------------------------------------------------------------------------------------------
@@ -92,7 +95,7 @@ impl ClientCfg {
         let kv = read_kv("relay_client.txt");
         let get = |k: &str| kv.get(k).cloned().unwrap_or_default();
         ClientCfg {
-            server: get("server"),
+            server: if get("server").trim().is_empty() { DEFAULT_SERVER.to_string() } else { get("server") },
             key: get("key"),
             name: if get("name").is_empty() { computer_name() } else { get("name") },
             id: get("id"),
@@ -377,6 +380,33 @@ impl RelayPanel {
         self.subscribe();
     }
 
+    /// "Qayta ulanish" tugmasi: agent ishlayotgan bo'lsa kutish (backoff) bekor qilinib darhol qayta urinadi,
+    /// to'xtagan bo'lsa qaytadan ishga tushiriladi.
+    fn reconnect(&mut self) {
+        match &self.agent {
+            Some(a) => {
+                a.network_changed();
+                self.status = "qayta ulanilmoqda...".into();
+            }
+            None => self.start_agent(),
+        }
+    }
+
+    /// Server bilan aloqa yo'q, lekin ulanish yoqilgan: qayta ulanish tugmasi ko'rsatiladi.
+    fn reconnect_row(&mut self, ui: &mut Ui) -> bool {
+        if self.online || !self.cfg.enabled {
+            return false;
+        }
+        let mut clicked = false;
+        ui.horizontal_wrapped(|ui| {
+            clicked = theme::button(ui, "Qayta ulanish").clicked();
+            if !self.status.is_empty() {
+                ui.label(theme::dim(&self.status));
+            }
+        });
+        clicked
+    }
+
     fn stop_agent(&mut self) {
         self.agent = None;
         self.ondemand.stop();
@@ -625,6 +655,7 @@ impl RelayPanel {
 
     fn card_connect(&mut self, ui: &mut Ui) -> Option<ConnectRequest> {
         let mut request = None;
+        let mut reconnect = false;
         theme::card(ui, Some("ID BO'YICHA ULANISH"), |ui| {
             let mut enter = false;
             theme::form(ui, "relay_conn", |ui| {
@@ -641,20 +672,34 @@ impl RelayPanel {
                 ui.end_row();
             });
             ui.add_space(6.0);
+            let id = relay::normalize_id(&self.target);
+            let can = relay::valid_id(&id) && self.online;
             if let Some(e) = &self.error {
                 theme::error_banner(ui, e);
                 ui.add_space(6.0);
+                // Oxirgi ID ga qaytadan ulanish (sessiya uzilgan yoki ulanib bo'lmagan)
+                if can && theme::button(ui, "Qayta ulanish").clicked() {
+                    enter = true;
+                }
+                ui.add_space(6.0);
             }
-            let id = relay::normalize_id(&self.target);
-            let can = relay::valid_id(&id) && self.online;
             if !self.online {
-                theme::note(ui, "Avval pastda serverga ulaning (\"Bu kompyuter\" kartasi).", theme::WARN);
+                if self.cfg.enabled {
+                    theme::note(ui, "Server bilan aloqa yo'q.", theme::WARN);
+                    reconnect = self.reconnect_row(ui);
+                } else {
+                    theme::note(ui, "Avval pastda serverga ulaning (\"Bu kompyuter\" kartasi).", theme::WARN);
+                }
+                ui.add_space(4.0);
             }
             if theme::accent_button(ui, "Ulanish", egui::vec2(160.0, 34.0), can).clicked() || (enter && can) {
                 self.error = None;
                 request = Some(ConnectRequest { id, password: self.password.clone() });
             }
         });
+        if reconnect {
+            self.reconnect();
+        }
         request
     }
 
@@ -664,6 +709,7 @@ impl RelayPanel {
         let mut untrust: Option<usize> = None;
         let mut save_pw = false;
         let mut policy_changed = false;
+        let mut reconnect = false;
         theme::card(ui, Some("BU KOMPYUTER (SERVERGA ULANISH)"), |ui| {
             let mut on = self.cfg.enabled;
             if theme::toggle(ui, &mut on, "Serverga ulanib, ID orqali ulanishga ruxsat berish").changed() {
@@ -696,7 +742,9 @@ impl RelayPanel {
                 }
                 ui.end_row();
             });
-            if !self.online && !self.status.is_empty() {
+            if self.reconnect_row(ui) {
+                reconnect = true;
+            } else if !self.online && !self.cfg.enabled && !self.status.is_empty() {
                 theme::hint(ui, &self.status);
             }
             if !self.cfg.id.is_empty() {
@@ -770,6 +818,8 @@ impl RelayPanel {
         if apply {
             self.cfg.save();
             self.start_agent();
+        } else if reconnect {
+            self.reconnect();
         }
         if save_pw {
             match ondemand::save_password(&self.unattended_pw) {

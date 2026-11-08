@@ -25,6 +25,7 @@ import kotlin.math.roundToInt
 class MainActivity : Activity() {
     private lateinit var settings: Settings
     private lateinit var statusView: TextView
+    private lateinit var reconnectBtn: android.widget.Button
     private lateinit var serverTitle: TextView
     private lateinit var serverState: TextView
     private lateinit var serverEdit: EditText
@@ -91,7 +92,19 @@ class MainActivity : Activity() {
         }
         root.addView(label("MS Remote", 22f, bold = true))
         statusView = label("", 13f, Colors.DIM)
-        root.addView(statusView, lp(top = 2))
+        // Server bilan aloqa yo'q bo'lsa: kutib o'tirmasdan darhol qayta ulanish
+        reconnectBtn = button("Qayta ulanish") {
+            if (AgentManager.isStarted && settings.server.isNotBlank()) Native.networkChanged() else AgentManager.start(settings)
+        }
+        root.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                addView(statusView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(reconnectBtn)
+            },
+            lp(top = 2),
+        )
 
         // --- ulanish kartasi
         idEdit = edit("9 xonali ID", settings.lastTarget, InputType.TYPE_CLASS_NUMBER)
@@ -268,6 +281,7 @@ class MainActivity : Activity() {
         serverTitle.setTextColor(if (AgentManager.online) Colors.GOOD else Colors.TEXT)
         serverState.text = if (AgentManager.online) "Ulandi ✓" else AgentManager.status
         serverState.setTextColor(if (AgentManager.online) Colors.GOOD else Colors.DIM)
+        reconnectBtn.visibility = if (AgentManager.online) View.GONE else View.VISIBLE
     }
 
     private fun setMode(p2p: Boolean) {

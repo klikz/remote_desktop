@@ -18,11 +18,14 @@ val HEIGHTS = listOf(720 to "720p", 1080 to "1080p", 1440 to "1440p", 2160 to "2
 
 data class Contact(val id: String, val name: String)
 
+/** Server manzili kiritilmagan bo'lsa ishlatiladigan standart relay server (PC'dagi `DEFAULT_SERVER` bilan bir xil). */
+const val DEFAULT_SERVER = "cloud.hubnode.uz:8781"
+
 class Settings(ctx: Context) {
     private val p: SharedPreferences = ctx.getSharedPreferences("rd", Context.MODE_PRIVATE)
 
     var server: String
-        get() = p.getString("server", "") ?: ""
+        get() = (p.getString("server", "") ?: "").ifBlank { DEFAULT_SERVER }
         set(v) = p.edit().putString("server", v.trim()).apply()
     var key: String
         get() = p.getString("key", "") ?: ""
