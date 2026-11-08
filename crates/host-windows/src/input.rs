@@ -1,6 +1,6 @@
 //! Viewer'dan kelgan sichqoncha va klaviatura hodisalarini Windows'da bajarish (SendInput).
-//! Eslatma: yuqori huquqli oynalar (UAC, administrator dasturlar) va qulf ekrani oddiy dastur
-//! uchun yopiq, ularga kiritish ishlamaydi.
+//! Eslatma: qulf ekrani va UAC alohida desktopda; ularga kiritish faqat host SYSTEM huquqida
+//! ishlasagina ishlaydi (qarang `desktop.rs`). Oddiy foydalanuvchi jarayonida ishlamaydi.
 
 use protocol::InputEvent;
 use std::mem;
@@ -78,6 +78,8 @@ fn scancode(code: u32) -> Option<(u16, bool)> {
 }
 
 pub fn apply(ev: InputEvent) {
+    // Qulf ekrani/UAC alohida desktopda: kiritish shu desktopga yo'naltiriladi (SYSTEM huquqi kerak)
+    crate::desktop::attach_throttled();
     match ev {
         // 0..65535 asosiy monitorning butun maydoni: aynan olinayotgan ekran
         InputEvent::PointerMove { x, y } => mouse(i32::from(x), i32::from(y), 0, MOVE | ABSOLUTE),

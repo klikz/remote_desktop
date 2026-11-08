@@ -91,7 +91,13 @@ struct ClientCfg {
 }
 
 impl ClientCfg {
+    /// Sozlama fayli bormi (yo'q bo'lsa: birinchi ishga tushirish).
+    fn exists() -> bool {
+        file("relay_client.txt").is_some_and(|p| p.exists())
+    }
+
     fn load() -> Self {
+        let first_run = !Self::exists();
         let kv = read_kv("relay_client.txt");
         let get = |k: &str| kv.get(k).cloned().unwrap_or_default();
         ClientCfg {
@@ -100,7 +106,8 @@ impl ClientCfg {
             name: if get("name").is_empty() { computer_name() } else { get("name") },
             id: get("id"),
             token: get("token"),
-            enabled: get("enabled") == "1",
+            // Birinchi ishga tushirishda (fayl yo'q) server bilan ulanish sukut bo'yicha yoqiladi
+            enabled: if first_run { true } else { get("enabled") == "1" },
             unattended: get("unattended") == "1",
         }
     }
@@ -264,7 +271,11 @@ pub struct RelayPanel {
 
 impl RelayPanel {
     pub fn new() -> Self {
+        let first_run = !ClientCfg::exists();
         let cfg = ClientCfg::load();
+        if first_run {
+            cfg.save(); // keyingi ishga tushirishlarda ham xuddi shu holat
+        }
         let srv = read_kv("relay_server.txt");
         let key = read_text("relay_server.pw").trim().to_string();
         let mut p = RelayPanel {
@@ -358,7 +369,13 @@ impl RelayPanel {
             self.status = "server manzilini kiriting".into();
             return;
         }
-        let Ok(known_hosts) = paths::known_hosts_file() else { return };
+        let known_hosts = match paths::known_hosts_file() {
+            Ok(p) => p,
+            Err(e) => {
+                self.status = format!("sozlama papkasi topilmadi: {e:#}");
+                return;
+            }
+        };
         let cfg = AgentConfig {
             server: self.cfg.server_addr(),
             key: self.cfg.key.clone(),

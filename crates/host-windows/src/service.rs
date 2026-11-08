@@ -32,6 +32,8 @@ Buyruqlar:
   host-windows run [--bind IP] [--port PORT]
                                        Host'ni ishga tushirish
                                        (standart: --bind 0.0.0.0, port: UI'da saqlangan yoki 7777)
+  host-windows install-service         SYSTEM xizmatini o'rnatish (qulf ekrani ishlashi uchun; administrator)
+  host-windows uninstall-service       Xizmatni olib tashlash
 
 Birinchi ishga tushirishda Windows xavfsizlik devori (Firewall) so'raydi: \"Ruxsat berish\" ni bosing.
 Dasturning oynali versiyasida (`viewer`) \"Bu kompyuter\" bo'limidan ham yoqish mumkin.
@@ -50,6 +52,9 @@ pub async fn run_cli() -> Result<()> {
     match args.first().map(String::as_str) {
         Some("set-password") => set_password(),
         Some("run") => run_host(&args[1..]).await,
+        Some("install-service") => crate::winservice::install(),
+        Some("uninstall-service") => crate::winservice::uninstall(),
+        Some("service") => crate::winservice::run_service(&args[1..]),
         _ => {
             print!("{USAGE}");
             Ok(())

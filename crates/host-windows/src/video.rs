@@ -74,6 +74,7 @@ fn run(fps: u32, kbps: u32, max_height: u32, tx: Sender<EncodedFrame>, stop: &At
     let interval = Duration::from_micros(1_000_000 / u64::from(fps));
     let started = Instant::now();
 
+    crate::desktop::attach_input_desktop();
     let mut grab = Grabber::new()?;
     let (mut tw, mut th) = target_size(grab.w, grab.h, max_height);
     let mut enc = make_encoder(fps, kbps)?;
@@ -88,7 +89,9 @@ fn run(fps: u32, kbps: u32, max_height: u32, tx: Sender<EncodedFrame>, stop: &At
     while !stop.load(Ordering::Relaxed) {
         let t0 = Instant::now();
 
-        if grab.size_changed() {
+        // Desktop almashdimi (qulf ekrani <-> ish stoli)? Ekran DC si yangi desktopga qayta yaratiladi.
+        let desktop_changed = crate::desktop::attach_throttled();
+        if desktop_changed || grab.size_changed() {
             // Ekran o'lchami o'zgardi: yangi kadr o'lchamiga mos kodlagich va kalit kadr
             grab = Grabber::new()?;
             (tw, th) = target_size(grab.w, grab.h, max_height);

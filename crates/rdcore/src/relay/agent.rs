@@ -206,7 +206,7 @@ async fn run(
 ) {
     let mut subs: Vec<String> = vec![];
     let mut cfg = cfg;
-    let mut backoff = 2u64;
+    let mut backoff = 1u64;
     loop {
         let _ = ev.send(AgentEvent::Status { online: false, text: format!("{} ga ulanilmoqda...", cfg.server) });
         let started = std::time::Instant::now();
@@ -216,7 +216,7 @@ async fn run(
             Err(e) => format!("{e:#}"),
         };
         if started.elapsed() > Duration::from_secs(30) {
-            backoff = 2;
+            backoff = 1;
         }
         let _ = ev.send(AgentEvent::Status { online: false, text: format!("{why}. {backoff} s dan keyin qayta uriniladi") });
         let wait = sleep(Duration::from_secs(backoff));
@@ -249,8 +249,10 @@ async fn session(
     ev: &EvTx,
     subs: &mut Vec<String>,
 ) -> Result<Exit> {
-    let addr = tokio::net::lookup_host(cfg.server.as_str())
+    // DNS cheksiz kutmasligi uchun vaqt chegarasi (tarmoq hali tayyor bo'lmasa keyingi urinish tezroq bo'ladi)
+    let addr = timeout(STEP_TIMEOUT, tokio::net::lookup_host(cfg.server.as_str()))
         .await
+        .map_err(|_| anyhow!("{} manzilini aniqlash vaqti tugadi (DNS)", cfg.server))?
         .with_context(|| format!("{} manzili topilmadi", cfg.server))?
         .next()
         .ok_or_else(|| anyhow!("{} manzili topilmadi", cfg.server))?;
