@@ -39,36 +39,36 @@ pub fn apply(ctx: &Context) {
     v.window_fill = PANEL;
     v.extreme_bg_color = INPUT;
     v.faint_bg_color = CARD;
-    v.window_stroke = Stroke::new(1.0, BORDER);
+    v.window_stroke = Stroke::new(1.0_f32, BORDER);
     v.window_rounding = Rounding::same(12.0);
     v.menu_rounding = Rounding::same(R);
     v.selection.bg_fill = ACCENT.gamma_multiply(0.45);
-    v.selection.stroke = Stroke::new(1.0, ACCENT);
+    v.selection.stroke = Stroke::new(1.0_f32, ACCENT);
     v.hyperlink_color = ACCENT;
 
     let r = Rounding::same(R);
     let idle = Color32::from_rgb(30, 43, 58);
     let hover = Color32::from_rgb(38, 54, 72);
     v.widgets.noninteractive.bg_fill = CARD;
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT);
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, BORDER);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, TEXT);
     v.widgets.noninteractive.rounding = r;
     v.widgets.inactive.bg_fill = idle;
     v.widgets.inactive.weak_bg_fill = idle;
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, BORDER_STRONG);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT);
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, BORDER_STRONG);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, TEXT);
     v.widgets.inactive.rounding = r;
     // Hover'da chegara faqat biroz yorishadi, qalinligi va o'lchami o'zgarmaydi (maydonlar "sakramaydi"); fokus — ACCENT
     v.widgets.hovered.bg_fill = hover;
     v.widgets.hovered.weak_bg_fill = hover;
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(80, 104, 130));
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(80, 104, 130));
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
     v.widgets.hovered.rounding = r;
     v.widgets.hovered.expansion = 0.0;
     v.widgets.active.bg_fill = ACCENT.gamma_multiply(0.6);
     v.widgets.active.weak_bg_fill = ACCENT.gamma_multiply(0.6);
-    v.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
-    v.widgets.active.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+    v.widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
+    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
     v.widgets.active.rounding = r;
     v.widgets.active.expansion = 0.0;
     v.widgets.open.rounding = r;
@@ -100,11 +100,11 @@ pub fn page_frame() -> Frame {
 }
 
 pub fn side_frame() -> Frame {
-    Frame::none().fill(PANEL).stroke(Stroke::new(1.0, BORDER)).inner_margin(Margin::same(14.0))
+    Frame::none().fill(PANEL).stroke(Stroke::new(1.0_f32, BORDER)).inner_margin(Margin::same(14.0))
 }
 
 pub fn header_frame() -> Frame {
-    Frame::none().fill(PANEL).stroke(Stroke::new(1.0, BORDER)).inner_margin(Margin::symmetric(16.0, 8.0))
+    Frame::none().fill(PANEL).stroke(Stroke::new(1.0_f32, BORDER)).inner_margin(Margin::symmetric(16.0, 8.0))
 }
 
 pub fn bar_frame() -> Frame {
@@ -124,7 +124,7 @@ pub fn page_title(ui: &mut Ui, title: &str, hints: &[&str]) {
 pub fn card<R>(ui: &mut Ui, title: Option<&str>, add: impl FnOnce(&mut Ui) -> R) -> R {
     let r = Frame::none()
         .fill(CARD)
-        .stroke(Stroke::new(1.0, BORDER))
+        .stroke(Stroke::new(1.0_f32, BORDER))
         .rounding(Rounding::same(12.0))
         .inner_margin(Margin::symmetric(18.0, 16.0))
         .show(ui, |ui| {
@@ -200,7 +200,7 @@ pub fn pill(ui: &mut Ui, selected: bool, text: &str) -> Response {
     ui.add(
         egui::Button::new(RichText::new(text).color(color))
             .fill(fill)
-            .stroke(Stroke::new(1.0, stroke))
+            .stroke(Stroke::new(1.0_f32, stroke))
             .rounding(Rounding::same(16.0))
             .min_size(Vec2::new(0.0, 32.0)),
     )
@@ -223,7 +223,7 @@ pub fn toggle(ui: &mut Ui, on: &mut bool, text: impl Into<WidgetText>) -> Respon
                 bg = bg.gamma_multiply(0.5);
             }
             let hovered = (resp.hovered() || label.hovered()) && ui.is_enabled();
-            let stroke = if hovered { Stroke::new(1.0, Color32::from_rgb(110, 120, 142)) } else { Stroke::NONE };
+            let stroke = if hovered { Stroke::new(1.0_f32, Color32::from_rgb(110, 120, 142)) } else { Stroke::NONE };
             ui.painter().rect(rect, Rounding::same(size.y / 2.0), bg, stroke);
             let r = size.y / 2.0 - 3.0;
             let x = egui::lerp((rect.left() + r + 3.0)..=(rect.right() - r - 3.0), t);
@@ -280,7 +280,7 @@ pub fn danger_button(ui: &mut Ui, text: &str) -> Response {
 pub fn error_banner(ui: &mut Ui, text: &str) {
     Frame::none()
         .fill(BAD.gamma_multiply(0.14))
-        .stroke(Stroke::new(1.0, BAD.gamma_multiply(0.6)))
+        .stroke(Stroke::new(1.0_f32, BAD.gamma_multiply(0.6)))
         .rounding(Rounding::same(R))
         .inner_margin(Margin::same(10.0))
         .show(ui, |ui| {

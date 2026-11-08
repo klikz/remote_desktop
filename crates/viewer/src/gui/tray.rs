@@ -32,6 +32,7 @@ pub fn show_window() {
     SHOWN.store(true, Ordering::SeqCst);
 }
 
+#[allow(dead_code)] // Show/Quit hozircha yuborilmaydi (tray menyu yo'q), lekin qayta ishlanadi
 pub enum Cmd {
     Show,
     Quit,

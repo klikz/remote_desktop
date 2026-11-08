@@ -59,6 +59,7 @@ impl WinHost {
         w
     }
 
+    #[allow(dead_code)]
     pub fn running(&self) -> bool {
         self.host.is_some()
     }

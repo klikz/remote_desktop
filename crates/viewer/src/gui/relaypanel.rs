@@ -587,7 +587,7 @@ impl RelayPanel {
                 let is_sel = selected == c.id;
                 egui::Frame::none()
                     .fill(if is_sel { theme::ACCENT.gamma_multiply(0.22) } else { theme::CARD })
-                    .stroke(egui::Stroke::new(1.0, if is_sel { theme::ACCENT } else { theme::BORDER }))
+                    .stroke(egui::Stroke::new(1.0_f32, if is_sel { theme::ACCENT } else { theme::BORDER }))
                     .rounding(egui::Rounding::same(10.0))
                     .inner_margin(egui::Margin::same(10.0))
                     .show(ui, |ui| {

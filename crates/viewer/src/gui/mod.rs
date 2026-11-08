@@ -578,7 +578,7 @@ impl App {
                     } else {
                         Color32::TRANSPARENT
                     };
-                    let stroke = if selected { egui::Stroke::new(1.0, theme::ACCENT) } else { egui::Stroke::NONE };
+                    let stroke = if selected { egui::Stroke::new(1.0_f32, theme::ACCENT) } else { egui::Stroke::NONE };
                     let p = ui.painter_at(rect);
                     p.rect(rect, egui::Rounding::same(8.0), fill, stroke);
                     p.text(rect.min + egui::vec2(12.0, 9.0), Align2::LEFT_TOP, &h.name, egui::FontId::proportional(14.0), theme::TEXT);
@@ -773,7 +773,7 @@ impl App {
                 let split = fp[..half].rfind(':').map(|i| i + 1).unwrap_or(half);
                 egui::Frame::none()
                     .fill(theme::BG)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
                     .rounding(egui::Rounding::same(8.0))
                     .inner_margin(egui::Margin::same(10.0))
                     .show(ui, |ui| {
