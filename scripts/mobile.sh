@@ -50,8 +50,8 @@ native() {
 build() {
   native
   (cd "$MV" && ./gradlew --no-daemon assembleDebug)
-  mkdir -p "$ROOT/builds" && cp -f "$APK" "$ROOT/builds/msremote-debug.apk"
-  echo "APK tayyor: $ROOT/builds/msremote-debug.apk"
+  mkdir -p "$ROOT/builds" && cp -f "$APK" "$ROOT/builds/ulan_desk.apk"
+  echo "APK tayyor: $ROOT/builds/ulan_desk.apk"
 }
 
 keytool_bin() {
@@ -72,7 +72,7 @@ keystore() {
   read -r -s -p "Parolni takrorlang: " pw2; echo
   [ "$pw" = "$pw2" ] || { echo "Parollar mos kelmadi"; exit 1; }
   [ "${#pw}" -ge 6 ] || { echo "Parol juda qisqa"; exit 1; }
-  local cn="${KEY_CN:-MS Remote}"
+  local cn="${KEY_CN:-Ulan}"
   RD_KS_PW="$pw" "$(keytool_bin)" -genkeypair -keystore "$jks" -alias msremote -keyalg RSA -keysize 4096 -validity 10000     -dname "CN=$cn" -storepass:env RD_KS_PW -keypass:env RD_KS_PW
   umask 077
   printf 'storeFile=release.jks
@@ -97,9 +97,9 @@ release() {
   signer="$(ls -d "$SDK"/build-tools/* 2>/dev/null | sort -V | tail -1)/apksigner"
   [ -e "$signer" ] || signer="$signer.bat"
   if [ -e "$signer" ]; then "$signer" verify --print-certs "$apk" | grep -E "certificate (DN|SHA-256)" | sort -u || true; fi
-  mkdir -p "$ROOT/builds" && cp -f "$apk" "$ROOT/builds/msremote-release.apk" && cp -f "$aab" "$ROOT/builds/msremote-release.aab"
-  echo "APK (to'g'ridan-to'g'ri o'rnatish uchun): $ROOT/builds/msremote-release.apk"
-  echo "AAB (Google Play uchun):                  $ROOT/builds/msremote-release.aab"
+  mkdir -p "$ROOT/builds" && cp -f "$apk" "$ROOT/builds/ulan_desk-release.apk" && cp -f "$aab" "$ROOT/builds/ulan_desk-release.aab"
+  echo "APK (to'g'ridan-to'g'ri o'rnatish uchun): $ROOT/builds/ulan_desk-release.apk"
+  echo "AAB (Google Play uchun):                  $ROOT/builds/ulan_desk-release.aab"
 }
 
 

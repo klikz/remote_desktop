@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "MSRemote"
+rootProject.name = "Ulan"
 include(":app")

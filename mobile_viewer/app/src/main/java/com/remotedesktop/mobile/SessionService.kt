@@ -56,7 +56,7 @@ class SessionService : Service() {
         val open = packageManager.getLaunchIntentForPackage(packageName)
         val pending = open?.let { PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE) }
         return Notification.Builder(this, CHANNEL)
-            .setContentTitle("MS Remote")
+            .setContentTitle("Ulan")
             .setContentText("Kompyuter bilan ulanish faol")
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)
@@ -67,7 +67,7 @@ class SessionService : Service() {
     private fun acquireLocks() {
         if (wake == null) {
             val pm = applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
-            wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "msremote:session").apply {
+            wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ulan:session").apply {
                 setReferenceCounted(false)
                 acquire()
             }
@@ -75,7 +75,7 @@ class SessionService : Service() {
         if (wifi == null) {
             val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             val mode = if (Build.VERSION.SDK_INT >= 29) WifiManager.WIFI_MODE_FULL_LOW_LATENCY else WifiManager.WIFI_MODE_FULL_HIGH_PERF
-            wifi = wm.createWifiLock(mode, "msremote:session").apply {
+            wifi = wm.createWifiLock(mode, "ulan:session").apply {
                 setReferenceCounted(false)
                 acquire()
             }

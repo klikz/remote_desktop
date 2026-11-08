@@ -1,4 +1,4 @@
-# MS Remote — Android client
+# Ulan — Android client
 
 Faqat **client** (ko'rish va boshqarish): telefon relay server orqali 9 xonali ID bilan kompyuterga ulanadi.
 Interfeys — Kotlin (oddiy Android View'lar), tarmoq/protokol — Rust (`rdcore`, JNI orqali), video — `MediaCodec`.

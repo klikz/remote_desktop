@@ -6,18 +6,21 @@ use egui::{
     WidgetText,
 };
 
-pub const BG: Color32 = Color32::from_rgb(17, 19, 25);
-pub const PANEL: Color32 = Color32::from_rgb(23, 26, 33);
-pub const CARD: Color32 = Color32::from_rgb(30, 34, 43);
-pub const BORDER: Color32 = Color32::from_rgb(46, 51, 63);
+pub const BG: Color32 = Color32::from_rgb(13, 19, 28);
+pub const PANEL: Color32 = Color32::from_rgb(18, 26, 37);
+pub const CARD: Color32 = Color32::from_rgb(24, 35, 48);
+pub const BORDER: Color32 = Color32::from_rgb(38, 52, 68);
 /// Kiritish maydonlari, radio va ikkinchi darajali tugmalar chegarasi (kartadan ajralib turishi uchun).
-pub const BORDER_STRONG: Color32 = Color32::from_rgb(64, 71, 87);
+pub const BORDER_STRONG: Color32 = Color32::from_rgb(54, 72, 92);
 /// Kiritish maydoni foni.
-pub const INPUT: Color32 = Color32::from_rgb(21, 24, 31);
-pub const ACCENT: Color32 = Color32::from_rgb(86, 128, 255);
+pub const INPUT: Color32 = Color32::from_rgb(15, 23, 33);
+pub const ACCENT: Color32 = Color32::from_rgb(34, 166, 224);
+/// Logotipdagi yashil-moviy ikkinchi rang.
+#[allow(dead_code)]
+pub const ACCENT_2: Color32 = Color32::from_rgb(60, 207, 192);
 pub const TEXT: Color32 = Color32::from_rgb(226, 230, 239);
 pub const DIM: Color32 = Color32::from_rgb(138, 146, 163);
-pub const GOOD: Color32 = Color32::from_rgb(72, 199, 128);
+pub const GOOD: Color32 = Color32::from_rgb(60, 207, 160);
 pub const WARN: Color32 = Color32::from_rgb(240, 178, 74);
 pub const BAD: Color32 = Color32::from_rgb(238, 98, 98);
 
@@ -44,8 +47,8 @@ pub fn apply(ctx: &Context) {
     v.hyperlink_color = ACCENT;
 
     let r = Rounding::same(R);
-    let idle = Color32::from_rgb(38, 43, 54);
-    let hover = Color32::from_rgb(46, 52, 65);
+    let idle = Color32::from_rgb(30, 43, 58);
+    let hover = Color32::from_rgb(38, 54, 72);
     v.widgets.noninteractive.bg_fill = CARD;
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT);
@@ -58,7 +61,7 @@ pub fn apply(ctx: &Context) {
     // Hover'da chegara faqat biroz yorishadi, qalinligi va o'lchami o'zgarmaydi (maydonlar "sakramaydi"); fokus — ACCENT
     v.widgets.hovered.bg_fill = hover;
     v.widgets.hovered.weak_bg_fill = hover;
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(88, 96, 116));
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(80, 104, 130));
     v.widgets.hovered.fg_stroke = Stroke::new(1.0, Color32::WHITE);
     v.widgets.hovered.rounding = r;
     v.widgets.hovered.expansion = 0.0;
@@ -292,4 +295,16 @@ pub fn row_label(ui: &mut Ui, text: &str) {
         ui.set_min_size(Vec2::new(LABEL_W, FIELD_H));
         ui.label(dim(text));
     });
+}
+
+/// Ulan logotipi (bir marta yuklanadi va egui xotirasida saqlanadi).
+pub fn logo(ctx: &Context) -> egui::TextureHandle {
+    let id = egui::Id::new("ulan_logo_tex");
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return t;
+    }
+    let img = egui::ColorImage::from_rgba_unmultiplied([128, 128], &crate::icon_draw::icon_rgba(128));
+    let t = ctx.load_texture("ulan_logo", img, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    t
 }

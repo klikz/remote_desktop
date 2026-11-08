@@ -20,7 +20,7 @@ extern "system" {
 
 /// Yashirin oyna `update` chaqirmaydi, shuning uchun oynani to'g'ridan-to'g'ri Win32 orqali ochamiz.
 pub fn show_window() {
-    let title: Vec<u16> = "MS Remote\0".encode_utf16().collect();
+    let title: Vec<u16> = "Ulan\0".encode_utf16().collect();
     unsafe {
         let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
         if hwnd != 0 {
@@ -63,7 +63,7 @@ impl Tray {
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_menu_on_left_click(false)
-            .with_tooltip("MS Remote")
+            .with_tooltip("Ulan")
             .with_icon(make_icon()?)
             .build()
             .ok()?;
@@ -105,7 +105,7 @@ impl Tray {
         if self.last != text {
             self.last = text.to_string();
             self.status.set_text(text);
-            let _ = self.icon.set_tooltip(Some(format!("MS Remote · {text}")));
+            let _ = self.icon.set_tooltip(Some(format!("Ulan · {text}")));
         }
     }
 }

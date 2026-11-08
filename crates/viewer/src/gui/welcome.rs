@@ -223,7 +223,7 @@ impl Welcome {
         }
         let mut open = true;
         let screen = ctx.screen_rect();
-        egui::Window::new("MS Remote")
+        egui::Window::new("Ulan")
             .collapsible(false)
             .resizable(false)
             .title_bar(false)

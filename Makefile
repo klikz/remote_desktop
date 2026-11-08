@@ -40,8 +40,8 @@ toolchain:
 
 build: toolchain
 	bash scripts/build-viewer.sh
-	@mkdir -p builds && cp -f $(VIEWER) builds/msremote-viewer-linux
-	@echo "Tayyor: builds/msremote-viewer-linux"
+	@mkdir -p builds && cp -f $(VIEWER) builds/ulan_desk-linux
+	@echo "Tayyor: builds/ulan_desk-linux"
 
 HOST_BIN := $(HOME)/.local/bin/remote-desktop-host
 
@@ -69,7 +69,7 @@ clean:
 
 buildWin:
 	cargo build --release -p viewer
-	@$(MOBILE_BASH) -c "mkdir -p builds && cp -f target/release/viewer.exe builds/msremote-viewer.exe && echo Tayyor: builds/msremote-viewer.exe"
+	@$(MOBILE_BASH) -c "mkdir -p builds && cp -f target/release/viewer.exe builds/ulan_desk.exe && echo Tayyor: builds/ulan_desk.exe"
 
 runWin:
 	cargo run -p viewer

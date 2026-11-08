@@ -1,6 +1,6 @@
 //! Fayl almashinuvi: Viewer va Host o'rtasida har fayl uchun alohida QUIC oqimi (video va control'ga halaqit bermaydi).
 //!
-//! Xavfsizlik: Host faqat o'zining almashinuv papkasida (`<Yuklamalar>/MS Remote`) ishlaydi. Fayl nomida yo'l
+//! Xavfsizlik: Host faqat o'zining almashinuv papkasida (`<Yuklamalar>/Ulan`) ishlaydi. Fayl nomida yo'l
 //! bo'lishi mumkin emas, mavjud fayl ustiga yozilmaydi (nom `fayl (1).txt` ko'rinishida o'zgartiriladi).
 //! `RD_NO_FILES=1` bo'lsa, Host fayl almashinuvini rad etadi.
 //!
@@ -32,7 +32,7 @@ const ST_IO: u8 = 4;
 const ST_DISABLED: u8 = 5;
 
 /// Almashinuv papkasining nomi.
-pub const FOLDER: &str = "MS Remote";
+pub const FOLDER: &str = "Ulan";
 /// Bitta faylning eng katta hajmi.
 pub const MAX_FILE_LEN: u64 = 16 << 30;
 const MAX_NAME_LEN: usize = 255;

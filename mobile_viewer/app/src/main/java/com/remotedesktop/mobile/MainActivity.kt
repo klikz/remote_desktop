@@ -90,7 +90,14 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(24), dp(16), dp(24))
         }
-        root.addView(label("MS Remote", 22f, bold = true))
+        root.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                addView(android.widget.ImageView(context).apply { setImageResource(R.drawable.ulan_logo) }, LinearLayout.LayoutParams(dp(36), dp(36)))
+                addView(label("Ulan", 22f, bold = true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(10) })
+            },
+        )
         statusView = label("", 13f, Colors.DIM)
         // Server bilan aloqa yo'q bo'lsa: kutib o'tirmasdan darhol qayta ulanish
         reconnectBtn = button("Qayta ulanish") {

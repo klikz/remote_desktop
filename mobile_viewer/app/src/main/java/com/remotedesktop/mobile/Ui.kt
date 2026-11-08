@@ -13,12 +13,13 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 object Colors {
-    const val BG = 0xFF14171C.toInt()
-    const val CARD = 0xFF1E232B.toInt()
+    const val BG = 0xFF0E1620.toInt()
+    const val CARD = 0xFF16222F.toInt()
     const val TEXT = 0xFFE6E9EF.toInt()
     const val DIM = 0xFF8D96A5.toInt()
-    const val ACCENT = 0xFF4C8DFF.toInt()
-    const val GOOD = 0xFF4CC38A.toInt()
+    const val ACCENT = 0xFF22A6E0.toInt()
+    const val ACCENT2 = 0xFF3CCFC0.toInt()
+    const val GOOD = 0xFF3CCFA0.toInt()
     const val BAD = 0xFFFF6B6B.toInt()
 }
 
@@ -27,6 +28,12 @@ fun Context.dp(v: Int): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_
 fun Context.rounded(color: Int, radiusDp: Int = 10): GradientDrawable =
     GradientDrawable().apply {
         setColor(color)
+        cornerRadius = dp(radiusDp).toFloat()
+    }
+
+/** Ulan gradienti: ko'k -> havorang -> yashil-moviy. */
+fun Context.gradient(radiusDp: Int = 10): GradientDrawable =
+    GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFF1E6FE0.toInt(), 0xFF20B8D8.toInt(), Colors.ACCENT2)).apply {
         cornerRadius = dp(radiusDp).toFloat()
     }
 
@@ -55,7 +62,7 @@ fun Context.button(text: String, filled: Boolean = false, onClick: () -> Unit): 
         this.text = text
         isAllCaps = false
         setTextColor(if (filled) Color.WHITE else Colors.TEXT)
-        background = rounded(if (filled) Colors.ACCENT else Colors.BG, 8)
+        background = if (filled) gradient(8) else rounded(Colors.BG, 8)
         minHeight = 0
         minimumHeight = dp(40)
         minWidth = 0

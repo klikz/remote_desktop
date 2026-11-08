@@ -1,4 +1,4 @@
-# MS Remote
+# Ulan
 
 Cross-platform remote desktop. Reja va holat: [PLAN.md](PLAN.md).
 

@@ -113,7 +113,7 @@ pub fn autologin_enabled() -> bool {
 }
 
 fn autostart_file() -> Result<PathBuf, String> {
-    Ok(config_home()?.join("autostart/ms-remote.desktop"))
+    Ok(config_home()?.join("autostart/ulan.desktop"))
 }
 
 /// Host xizmati fayli (systemd user unit) o'rnatilganmi.
@@ -121,7 +121,7 @@ pub fn unit_installed() -> bool {
     config_home().map(|d| d.join("systemd/user/remote-desktop-host.service").exists()).unwrap_or(false)
 }
 
-/// Ubuntu'ga kirilganda dastur (MS Remote) o'zi ochiladimi.
+/// Ubuntu'ga kirilganda dastur (Ulan) o'zi ochiladimi.
 pub fn app_autostart_enabled() -> bool {
     autostart_file().map(|p| p.exists()).unwrap_or(false)
 }
@@ -149,7 +149,7 @@ pub fn set_app_autostart(on: bool) -> Result<(), String> {
     }
     quoted.push('"');
     let entry = format!(
-        "[Desktop Entry]\nType=Application\nName=MS Remote\nComment=Masofaviy ish stoli\nExec={quoted} --autostart\n\
+        "[Desktop Entry]\nType=Application\nName=Ulan\nComment=Masofaviy ish stoli\nExec={quoted} --autostart\n\
          Terminal=false\nX-GNOME-Autostart-enabled=true\nX-GNOME-Autostart-Delay=5\n"
     );
     fs::create_dir_all(path.parent().ok_or("yo'l noto'g'ri")?).map_err(|e| format!("papka yaratilmadi: {e}"))?;

@@ -31,13 +31,13 @@ use std::{
 pub fn run(minimized: bool) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("MS Remote")
+            .with_title("Ulan")
             .with_inner_size([1100.0, 720.0])
             .with_min_inner_size([760.0, 520.0])
             .with_icon(std::sync::Arc::new(egui::IconData { rgba: crate::icon_draw::icon_rgba(256), width: 256, height: 256 })),
         ..Default::default()
     };
-    eframe::run_native("MS Remote", options, Box::new(move |cc| Ok(Box::new(App::new(cc, minimized)))))
+    eframe::run_native("Ulan", options, Box::new(move |cc| Ok(Box::new(App::new(cc, minimized)))))
         .map_err(|e| anyhow::anyhow!("oyna ochilmadi: {e}"))
 }
 
@@ -494,8 +494,8 @@ impl App {
         let show_host = self.host_tab_shown || self.tab == Tab::Host;
         egui::TopBottomPanel::top("header").frame(theme::header_frame()).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                theme::dot(ui, theme::ACCENT);
-                ui.label(RichText::new("MS Remote").size(16.0).strong());
+                ui.add(egui::Image::new(&theme::logo(ctx)).fit_to_exact_size(egui::vec2(26.0, 26.0)));
+                ui.label(RichText::new("Ulan").size(17.0).strong());
                 ui.add_space(14.0);
                 for (t, name) in [(Tab::Relay, "Server orqali"), (Tab::Connect, "P2P"), (Tab::ThisPc, "P2P Sozlash"), (Tab::Host, "HOST")] {
                     if t == Tab::Host && !show_host {
@@ -983,7 +983,7 @@ impl App {
         egui::SidePanel::right("files").exact_width(300.0).resizable(false).frame(theme::side_frame()).show(ctx, |ui| {
             ui.label(RichText::new("FAYLLAR").size(11.0).color(theme::DIM).strong());
             ui.add_space(2.0);
-            theme::hint(ui, "Fayl yuborish: uni shu oynaga sudrab tashlang. U Host'ning \"downloads/MS Remote\" papkasiga tushadi.");
+            theme::hint(ui, "Fayl yuborish: uni shu oynaga sudrab tashlang. U Host'ning \"downloads/Ulan\" papkasiga tushadi.");
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 refresh = theme::button(ui, "Yangilash").clicked();
