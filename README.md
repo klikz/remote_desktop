@@ -24,9 +24,8 @@ Rust (stable) kerak: https://rustup.rs
 1. Avtomatik testlar (bir kompyuterda Host + Viewer): `cargo test --workspace`
 2. Qo'lda sinash:
    - Ubuntu: `cargo run -p host-linux -- set-password`, keyin `cargo run -p host-linux -- run`
-     (fingerprint ekranga chiqadi; Ubuntu firewall'da bo'lsa: `sudo ufw allow 7777/udp`)
+     (Ubuntu firewall'da bo'lsa: `sudo ufw allow 7777/udp`)
    - Windows: `cargo run -p viewer` (oynali) yoki `cargo run -p viewer -- connect <Ubuntu IP>`
-     (birinchi marta fingerprint'ni Host ekranidagi bilan solishtirib `yes` deng)
 
 ## Bosqich 2 sinovi (Ubuntu Host: portal va ekran olish)
 

@@ -79,7 +79,7 @@ Yangi versiya chiqarishdan oldin `app/build.gradle.kts` dagi `versionCode` ni os
 
 1. **Server sozlamalari**: relay server manzili (`host` yoki `host:port`, standart port 7780), server kaliti va qurilma nomi → "Saqlash va qayta ulanish". Tepada "Onlayn" va o'z ID ko'rinadi.
 2. Kompyuterning 9 xonali ID sini kiriting (qarovsiz rejim bo'lsa parol ham), sifat shablonini tanlang (desktop viewer'dagi 5 ta shablon + FPS/bitrate/o'lcham slayderlari), "Ulanish".
-3. Host tomonda ruxsat berilgach video ochiladi. Birinchi ulanishda Host fingerprint'i tasdiqlanadi.
+3. Host tomonda ruxsat berilgach video ochiladi.
 4. Muvaffaqiyatli ulangan ID'lar "Kontaktlar" ga saqlanadi (onlayn holati ko'rinadi; bosib ID ni to'ldiring, uzoq bosib o'chiring).
 
 ### Ko'rish ekrani

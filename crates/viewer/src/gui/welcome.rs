@@ -236,9 +236,10 @@ impl Welcome {
                     if !self.has_content() {
                         ui.vertical_centered(|ui| {
                             ui.add_space(30.0);
-                            ui.add(egui::Spinner::new().size(28.0).color(theme::ACCENT));
-                            ui.add_space(8.0);
-                            ui.label(theme::dim("Yuklanmoqda..."));
+                            // Spinner har kadrda (~60 fps) qayta chizadi va CPU yeydi: oddiy matn
+                            let dots = ".".repeat(1 + (ctx.input(|i| i.time) as usize % 3));
+                            ui.label(theme::dim(&format!("Yuklanmoqda{dots}")));
+                            ctx.request_repaint_after(Duration::from_millis(500));
                             ui.add_space(30.0);
                         });
                     }

@@ -25,15 +25,6 @@ pub fn decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Fingerprint ko'rinishi: `AB:CD:EF:...`
-pub fn colon(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|b| format!("{b:02X}"))
-        .collect::<Vec<_>>()
-        .join(":")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -52,11 +43,5 @@ mod tests {
         assert!(decode("zz").is_none());
         assert!(decode("é1").is_none());
         assert_eq!(decode("").unwrap(), Vec::<u8>::new());
-    }
-
-    #[test]
-    fn colon_format() {
-        assert_eq!(colon(&[0xab, 0x01, 0xff]), "AB:01:FF");
-        assert_eq!(colon(&[]), "");
     }
 }

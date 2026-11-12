@@ -7,7 +7,6 @@ use protocol::{DEFAULT_PORT, SERVER_NAME};
 use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, SocketAddr},
-    path::PathBuf,
     sync::{mpsc as std_mpsc, Arc, Mutex},
     time::Duration,
 };
@@ -24,9 +23,7 @@ use super::{
 use crate::{
     auth::{self, Credentials},
     cert::sha256,
-    hexfmt,
-    known_hosts::{KnownHosts, Trust},
-    onetime, paths, tcp_tunnel, tls,
+    hexfmt, onetime, paths, tcp_tunnel, tls,
 };
 
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -41,7 +38,6 @@ pub struct AgentConfig {
     /// Oldingi ro'yxatdan o'tishda berilgan ID va token (bo'sh: yangi ID olinadi).
     pub id: String,
     pub token: String,
-    pub known_hosts: PathBuf,
     /// Mahalliy Host'ning UDP porti (`None`: saqlangan port yoki standart).
     pub host_port: Option<u16>,
 }
@@ -268,23 +264,13 @@ async fn session(
     .map_err(|_| anyhow!("{} javob bermadi (server ishlayaptimi, port ochiqmi?)", cfg.server))?
     .context("QUIC ulanishi muvaffaqiyatsiz")?;
 
-    // Server fingerprint'i: birinchi ulanishda saqlanadi, keyin o'zgarsa ulanish rad etiladi.
+    // Sertifikat xeshi server kaliti isbotiga bog'lanadi.
     let cert = seen
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take()
         .ok_or_else(|| anyhow!("server sertifikati olinmadi"))?;
     let fp_bytes = sha256(&cert);
-    let fp = hexfmt::colon(&fp_bytes);
-    let kh = KnownHosts::new(cfg.known_hosts.clone());
-    let key = format!("relay:{}", cfg.server);
-    match kh.check(&key, &fp)? {
-        Trust::Known => {}
-        Trust::Unknown => kh.add(&key, &fp)?,
-        Trust::Changed { expected } => bail!(
-            "DIQQAT: relay server fingerprint'i o'zgargan!\n  saqlangan: {expected}\n  hozirgi:   {fp}\nKnown_hosts faylidan `{key}` qatorini o'chirmaguncha ulanilmaydi."
-        ),
-    }
 
     let (mut send, mut recv) = conn.open_bi().await.context("control oqimini ochib bo'lmadi")?;
     write_msg(&mut send, &RMsg::Hello { id: cfg.id.clone(), token: cfg.token.clone(), name: cfg.name.clone() }).await?;
@@ -309,7 +295,7 @@ async fn session(
         RMsg::Err { text } => bail!("server rad etdi: {text}"),
         other => bail!("kutilmagan xabar: {other:?}"),
     }
-    let _ = ev.send(AgentEvent::Status { online: true, text: format!("serverga ulangan (fingerprint {})", &fp[..23.min(fp.len())]) });
+    let _ = ev.send(AgentEvent::Status { online: true, text: "serverga ulangan".into() });
     if !subs.is_empty() {
         write_msg(&mut send, &RMsg::Sub(subs.clone())).await?;
     }

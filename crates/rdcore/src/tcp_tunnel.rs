@@ -1,6 +1,6 @@
 //! QUIC (UDP) paketlarini TCP orqali tashish: UDP bloklangan tarmoqlar uchun zaxira yo'l.
 //!
-//! Mavjud QUIC ulanishiga tegilmaydi. Shifrlash, fingerprint tekshiruvi va parol autentifikatsiyasi
+//! Mavjud QUIC ulanishiga tegilmaydi. Shifrlash va parol autentifikatsiyasi
 //! avvalgidek QUIC ichida bajariladi, TCP esa faqat tayyor (shifrlangan) datagrammalarni tashiydi.
 //!
 //! ```text
@@ -85,9 +85,10 @@ where
 
     let (u, d) = (udp.clone(), dst.clone());
     let mut up = tokio::spawn(async move {
-        let mut buf = vec![0u8; 65536];
+        // Birinchi 2 bayt uzunlik uchun: har datagrammada yangi bufer ajratilmaydi va bitta yozuv bilan yuboriladi
+        let mut buf = vec![0u8; 2 + 65536];
         loop {
-            match timeout(IDLE, u.recv_from(&mut buf)).await {
+            match timeout(IDLE, u.recv_from(&mut buf[2..])).await {
                 Err(_) => break,
                 // Windows: yopilgan UDP portdan ICMP xatosi kelsa, recv_from shu xatoni qaytaradi.
                 Ok(Err(e)) if e.kind() == ErrorKind::ConnectionReset => continue,
@@ -96,10 +97,9 @@ where
                     if learn {
                         *d.lock().unwrap_or_else(|e| e.into_inner()) = Some(src);
                     }
-                    let mut frame = Vec::with_capacity(n + 2);
-                    frame.extend_from_slice(&(n as u16).to_be_bytes());
-                    frame.extend_from_slice(&buf[..n]);
-                    if wr.write_all(&frame).await.is_err() {
+                    let Ok(len) = u16::try_from(n) else { continue };
+                    buf[..2].copy_from_slice(&len.to_be_bytes());
+                    if wr.write_all(&buf[..n + 2]).await.is_err() {
                         break;
                     }
                 }
@@ -117,8 +117,10 @@ where
                 _ => break,
             }
             let n = u16::from_be_bytes(hdr) as usize;
-            if rd.read_exact(&mut data[..n]).await.is_err() {
-                break;
+            // Sarlavha kelgan bo'lsa tanasi ham shu zahoti kelishi kerak: yarim yo'lda qotgan oqim abadiy kutilmaydi
+            match timeout(IDLE, rd.read_exact(&mut data[..n])).await {
+                Ok(Ok(_)) => {}
+                _ => break,
             }
             let target = *dst.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(t) = target {
@@ -224,15 +226,18 @@ async fn serve_one(mut tcp: TcpStream, real: IpAddr, lo: IpAddr, target: SocketA
         Ok(Ok(_)) if &magic == MAGIC => {}
         _ => return,
     }
-    // Doimiy 127.x.y.z manzil; bog'lab bo'lmasa, oddiy 127.0.0.1 ishlatiladi.
-    let (udp, lo) = match UdpSocket::bind(SocketAddr::new(lo, 0)).await {
-        Ok(s) => (s, lo),
+    // Doimiy 127.x.y.z manzil; bog'lab bo'lmasa, oddiy 127.0.0.1 ishlatiladi. 127.0.0.1 ro'yxatga yozilmaydi:
+    // u boshqa lokal ulanishlar (relay agenti) bilan umumiy, yozuv esa tunnel yopilgach ham qolib ketardi.
+    let udp = match UdpSocket::bind(SocketAddr::new(lo, 0)).await {
+        Ok(s) => {
+            registry().lock().unwrap_or_else(|e| e.into_inner()).insert(lo, real);
+            s
+        }
         Err(_) => match UdpSocket::bind("127.0.0.1:0").await {
-            Ok(s) => (s, IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            Ok(s) => s,
             Err(_) => return,
         },
     };
-    registry().lock().unwrap_or_else(|e| e.into_inner()).insert(lo, real);
     eprintln!("[host] {real}: TCP tunnel ochildi");
     pump(tcp, udp, Some(target), false).await;
     eprintln!("[host] {real}: TCP tunnel yopildi");

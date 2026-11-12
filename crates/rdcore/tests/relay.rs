@@ -6,7 +6,6 @@ use rdcore::{
     auth::Credentials,
     cert::HostIdentity,
     client::{connect_relayed, ConnectOptions},
-    known_hosts::KnownHosts,
     paths,
     relay::{
         agent::{Agent, AgentConfig, AgentEvent, Policy, Relayed},
@@ -40,14 +39,13 @@ async fn wait_event<T>(agent: &Agent, mut f: impl FnMut(AgentEvent) -> Option<T>
     .expect("kutilgan hodisa kelmadi")
 }
 
-fn cfg(server: &str, key: &str, name: &str, dir: &std::path::Path, host_port: Option<u16>) -> AgentConfig {
+fn cfg(server: &str, key: &str, name: &str, host_port: Option<u16>) -> AgentConfig {
     AgentConfig {
         server: server.to_string(),
         key: key.to_string(),
         name: name.to_string(),
         id: String::new(),
         token: String::new(),
-        known_hosts: dir.join(format!("kh-{name}")),
         host_port,
     }
 }
@@ -60,11 +58,9 @@ async fn registered(a: &Agent) -> String {
     .await
 }
 
-async fn ping_through(relayed: Relayed, target_id: &str, password: &str, dir: &std::path::Path) {
-    let kh = KnownHosts::new(dir.join("kh-viewer"));
+async fn ping_through(relayed: Relayed, password: &str) {
     let mut s = connect_relayed(
-        ConnectOptions { addr: relayed.local, password, known_hosts: &kh, confirm_new_host: &|_| true },
-        format!("id:{target_id}"),
+        ConnectOptions { addr: relayed.local, password },
     )
     .await
     .expect("relay orqali ulanish");
@@ -102,7 +98,7 @@ async fn relay_end_to_end() {
     tokio::spawn(server.run());
 
     // Noto'g'ri server kaliti rad etiladi
-    let bad = Agent::start(cfg(&server_addr, "wrong-key-12345", "bad", &dir, None), Policy::default());
+    let bad = Agent::start(cfg(&server_addr, "wrong-key-12345", "bad", None), Policy::default());
     wait_event(&bad, |e| match e {
         AgentEvent::Status { text, .. } if text.contains("rad etdi") => Some(()),
         _ => None,
@@ -111,8 +107,8 @@ async fn relay_end_to_end() {
     drop(bad);
 
     // A (ulanuvchi) va B (qabul qiluvchi)
-    let a = Agent::start(cfg(&server_addr, SERVER_KEY, "A", &dir, None), Policy::default());
-    let b = Agent::start(cfg(&server_addr, SERVER_KEY, "B", &dir, Some(host_port)), Policy::default());
+    let a = Agent::start(cfg(&server_addr, SERVER_KEY, "A", None), Policy::default());
+    let b = Agent::start(cfg(&server_addr, SERVER_KEY, "B", Some(host_port)), Policy::default());
     let (a_id, b_id) = (registered(&a).await, registered(&b).await);
     assert_ne!(a_id, b_id);
     assert!(rdcore::relay::valid_id(&a_id));
@@ -137,7 +133,7 @@ async fn relay_end_to_end() {
     b.reply(&sid, true);
     let relayed = timeout(Duration::from_secs(8), rx).await.unwrap().unwrap().expect("ruxsat berilishi kerak");
     let pw = relayed.pw.clone().expect("dialogli rejimda bir martalik kalit keladi");
-    ping_through(relayed, &b_id, &pw, &dir).await;
+    ping_through(relayed, &pw).await;
 
     // Bir martalik parol bir marta ishlaydi: ikkinchi urinish rad etiladi
     let rx = a.connect(&b_id);
@@ -148,10 +144,8 @@ async fn relay_end_to_end() {
     .await;
     b.reply(&sid, true);
     let relayed = timeout(Duration::from_secs(8), rx).await.unwrap().unwrap().unwrap();
-    let kh = KnownHosts::new(dir.join("kh-viewer"));
     let again = connect_relayed(
-        ConnectOptions { addr: relayed.local, password: &pw, known_hosts: &kh, confirm_new_host: &|_| true },
-        format!("id:{b_id}"),
+        ConnectOptions { addr: relayed.local, password: &pw },
     )
     .await;
     assert!(again.is_err(), "eski bir martalik kalit ishlamasligi kerak");
@@ -171,7 +165,7 @@ async fn relay_end_to_end() {
     b.policy.lock().unwrap().unattended = true;
     let relayed = timeout(Duration::from_secs(8), a.connect(&b_id)).await.unwrap().unwrap().expect("qarovsiz qabul");
     assert!(relayed.pw.is_none());
-    ping_through(relayed, &b_id, HOST_PW, &dir).await;
+    ping_through(relayed, HOST_PW).await;
 
     // 3b) Qarovsiz rejim, alohida parol va talab bo'yicha Host (Host paroli va porti ishlatilmaydi)
     const UNATT_PW: &str = "unattended-pw-456";
@@ -185,22 +179,18 @@ async fn relay_end_to_end() {
         tokio::spawn(h.run());
         Ok((port, salt))
     });
-    let _ = std::fs::remove_file(dir.join("kh-viewer")); // yangi Host: boshqa sertifikat
     b.policy.lock().unwrap().ensure_host = Some(ensure);
     let relayed = timeout(Duration::from_secs(8), a.connect(&b_id)).await.unwrap().unwrap().expect("qarovsiz qabul");
-    ping_through(relayed, &b_id, UNATT_PW, &dir).await;
+    ping_through(relayed, UNATT_PW).await;
     let relayed = timeout(Duration::from_secs(8), a.connect(&b_id)).await.unwrap().unwrap().expect("qarovsiz qabul");
-    let kh = KnownHosts::new(dir.join("kh-viewer"));
     let wrong = connect_relayed(
-        ConnectOptions { addr: relayed.local, password: HOST_PW, known_hosts: &kh, confirm_new_host: &|_| true },
-        format!("id:{b_id}"),
+        ConnectOptions { addr: relayed.local, password: HOST_PW },
     )
     .await;
     assert!(wrong.is_err(), "Host kaliti qarovsiz Host'da ishlamasligi kerak");
 
     // 3c) Qarovsiz rejim, lekin Viewer parolsiz (`ask`): ruxsat oynasi, so'ng talab bo'yicha Host'ning
     // tuzi bilan olingan bir martalik parol ishlaydi
-    let _ = std::fs::remove_file(dir.join("kh-viewer"));
     let rx = a.connector().connect_ask(&b_id, true);
     let (sid, _) = wait_event(&b, |e| match e {
         AgentEvent::Incoming { sid, from, .. } => Some((sid, from)),
@@ -210,7 +200,7 @@ async fn relay_end_to_end() {
     b.reply(&sid, true);
     let relayed = timeout(Duration::from_secs(8), rx).await.unwrap().unwrap().expect("ruxsat berilishi kerak");
     let pw = relayed.pw.clone().expect("kalitsiz so'rovga bir martalik kalit keladi");
-    ping_through(relayed, &b_id, &pw, &dir).await;
+    ping_through(relayed, &pw).await;
     b.policy.lock().unwrap().ensure_host = None;
 
     // 4) Yo'q ID va oflayn
@@ -254,8 +244,8 @@ async fn open_server_and_key_policy() {
 
     // Ochiq server: kalit bo'sh
     let open = start(None, "open.txt");
-    let a = Agent::start(cfg(&open, "", "A", &dir, None), Policy::default());
-    let b = Agent::start(cfg(&open, "ixtiyoriy", "B", &dir, None), Policy::default());
+    let a = Agent::start(cfg(&open, "", "A", None), Policy::default());
+    let b = Agent::start(cfg(&open, "ixtiyoriy", "B", None), Policy::default());
     let (_a_id, _b_id) = (registered(&a).await, registered(&b).await);
 
     // Yo'q ID ga 10 marta urinish: keyin bloklanadi
@@ -268,7 +258,7 @@ async fn open_server_and_key_policy() {
 
     // Kalitli server bo'sh kalitni rad etadi
     let keyed = start(Some(Credentials::from_password(SERVER_KEY).unwrap()), "keyed.txt");
-    let c = Agent::start(cfg(&keyed, "", "C", &dir, None), Policy::default());
+    let c = Agent::start(cfg(&keyed, "", "C", None), Policy::default());
     wait_event(&c, |e| match e {
         AgentEvent::Status { text, .. } if text.contains("kalit talab qiladi") => Some(()),
         _ => None,

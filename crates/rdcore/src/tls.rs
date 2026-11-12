@@ -1,8 +1,8 @@
 //! TLS 1.3 / QUIC sozlamalari.
 //!
 //! Viewer tomonda sertifikat TLS darajasida tekshirilmaydi (CA yo'q), faqat qayd etiladi.
-//! Haqiqiylik `known_hosts` fingerprint tekshiruvi va autentifikatsiya isbotidagi
-//! fingerprint bog'lanishi orqali ta'minlanadi (`client.rs`, `auth.rs`).
+//! Sertifikat xeshi autentifikatsiya isbotiga bog'lanadi (`client.rs`, `auth.rs`): vositachi
+//! isbotni haqiqiy Host'ga uzata olmaydi.
 
 use anyhow::{Context, Result};
 use rustls::{

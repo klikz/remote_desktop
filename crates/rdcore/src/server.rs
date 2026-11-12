@@ -89,10 +89,6 @@ impl Host {
         }
     }
 
-    pub fn fingerprint(&self) -> [u8; 32] {
-        self.state.fingerprint
-    }
-
     /// Ulanishlarni qabul qilish sikli (to'xtamaydi).
     pub async fn run(self) -> Result<()> {
         self.run_with(default_handler()).await

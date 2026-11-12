@@ -1,4 +1,4 @@
-//! Saqlangan Host'lar ro'yxati (`hosts.txt`, konfiguratsiya papkasida). Parol saqlanmaydi.
+//! Saqlangan Host'lar ro'yxati (`hosts.txt`, konfiguratsiya papkasida). Kalit bu faylda saqlanmaydi (qarang: `secrets`).
 //! Format: har qatorda `nom<TAB>manzil<TAB>fps<TAB>kbps<TAB>balandlik<TAB>boshqaruv(1/0)`.
 
 use std::path::PathBuf;

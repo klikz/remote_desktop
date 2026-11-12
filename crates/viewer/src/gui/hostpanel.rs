@@ -1,5 +1,5 @@
 //! "Bu kompyuter" bo'limi: ushbu kompyuter Host sifatida qanday ulanishni qabul qilishini ko'rsatadi
-//! (manzil, fingerprint, holat) va ulanish parolini o'rnatish imkonini beradi.
+//! (manzil, holat) va ulanish parolini o'rnatish imkonini beradi.
 //! Parol faqat xesh (argon2 kalit) ko'rinishida saqlanadi, shuning uchun keyin ko'rsatib bo'lmaydi:
 //! o'rnatilgan parol faqat shu dastur ochiq turganda, ko'rsatish uchun xotirada saqlanadi.
 
@@ -7,8 +7,7 @@ use super::theme;
 use egui::{RichText, Ui};
 use rdcore::{
     auth::{self, Credentials, MIN_PASSWORD_LEN},
-    cert::HostIdentity,
-    hexfmt, paths,
+    paths,
 };
 
 const ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -22,7 +21,6 @@ pub struct HostPanel {
     last_set: Option<String>,
     show_last: bool,
     message: Option<(bool, String)>,
-    fingerprint: Option<String>,
     ip: String,
     /// Keshlangan holatlar: har kadrda fayl o'qimaslik uchun, tegishli amaldan keyin yangilanadi.
     pw_set: bool,
@@ -93,10 +91,6 @@ fn restart_service() -> bool {
 
 impl HostPanel {
     pub fn new() -> Self {
-        let fingerprint = paths::config_dir()
-            .ok()
-            .and_then(|d| HostIdentity::load_or_create(&d).ok())
-            .map(|id| hexfmt::colon(&id.fingerprint()));
         let port_saved = paths::read_host_port().unwrap_or(protocol::DEFAULT_PORT);
         HostPanel {
             new_password: String::new(),
@@ -106,7 +100,6 @@ impl HostPanel {
             last_set: None,
             show_last: false,
             message: None,
-            fingerprint,
             ip: local_ip(),
             pw_set: Self::password_is_set(),
             port_saved,
@@ -364,25 +357,6 @@ impl HostPanel {
                         ui.ctx().output_mut(|o| o.copied_text = addr.clone());
                     }
                 });
-                match &self.fingerprint {
-                    Some(fp) => {
-                        let half = fp.len() / 2;
-                        let split = fp[..half].rfind(':').map(|i| i + 1).unwrap_or(half);
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            theme::row_label(ui, "Fingerprint");
-                            if theme::button(ui, "Nusxa").clicked() {
-                                ui.ctx().output_mut(|o| o.copied_text = fp.clone());
-                            }
-                        });
-                        ui.label(RichText::new(&fp[..split]).monospace().size(11.5).color(theme::DIM));
-                        ui.label(RichText::new(&fp[split..]).monospace().size(11.5).color(theme::DIM));
-                        theme::hint(ui, "Yangi Host'ga birinchi ulanishda Viewer shu qiymatni ko'rsatadi: solishtirib tasdiqlang.");
-                    }
-                    None => {
-                        ui.label(theme::dim("Fingerprint hali yaratilmagan"));
-                    }
-                }
             });
 
             #[cfg(windows)]

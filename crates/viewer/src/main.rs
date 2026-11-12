@@ -8,14 +8,10 @@ mod icon_draw;
 
 use anyhow::{bail, Context, Result};
 use protocol::DEFAULT_PORT;
-use rdcore::{
-    client::{connect_with, ConnectOptions, Transport},
-    known_hosts::KnownHosts,
-    paths,
-};
+use rdcore::client::{connect_with, ConnectOptions, Transport};
 use std::{
     fs::File,
-    io::{self, Write},
+    io::Write,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     time::{Duration, Instant},
@@ -108,34 +104,12 @@ async fn resolve(target: &str) -> Result<SocketAddr> {
     first.with_context(|| format!("{target} uchun manzil topilmadi"))
 }
 
-fn ask_yes_no(question: &str) -> bool {
-    print!("{question} [yes/no]: ");
-    let _ = io::stdout().flush();
-    let mut line = String::new();
-    if io::stdin().read_line(&mut line).is_err() {
-        return false;
-    }
-    matches!(line.trim().to_ascii_lowercase().as_str(), "yes" | "y")
-}
-
 async fn run_connect(target: &str, opts: Options) -> Result<()> {
     let addr = resolve(target).await?;
     let password = rpassword::prompt_password("Kalit: ")?;
-    let known_hosts = KnownHosts::new(paths::known_hosts_file()?);
-
-    let confirm = |fp: &str| {
-        println!("Bu Host'ga birinchi marta ulanyapsiz.");
-        println!("Fingerprint: {fp}");
-        println!("Uni Host ekranidagi fingerprint bilan solishtiring.");
-        ask_yes_no("Ishonasizmi?")
-    };
 
     println!("{addr} ga ulanilmoqda...");
-    let mut session = connect_with(
-        ConnectOptions { addr, password: &password, known_hosts: &known_hosts, confirm_new_host: &confirm },
-        opts.transport,
-    )
-    .await?;
+    let mut session = connect_with(ConnectOptions { addr, password: &password }, opts.transport).await?;
     println!("Ulandi{}. Host imkoniyatlari: {:?}", if session.via_tcp { " (TCP orqali)" } else { "" }, session.host_caps);
 
     if opts.video_secs > 0 {

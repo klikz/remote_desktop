@@ -7,9 +7,9 @@
 
 use protocol::InputEvent;
 use std::{
-    collections::VecDeque,
+    collections::{BTreeSet, VecDeque},
     sync::{
-        atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicU8, Ordering},
         Mutex,
     },
     time::{Duration, Instant},
@@ -97,6 +97,11 @@ impl VideoControl {
         ((fps * window.as_secs_f64()).ceil() as usize).max(MIN_IN_FLIGHT)
     }
 
+    /// Viewer oxirgi bildirgan dekoder navbati (diagnostika uchun).
+    pub fn viewer_queue(&self) -> i32 {
+        self.viewer_queue.load(Ordering::Relaxed)
+    }
+
     /// Keyingi kadrni kodlamaslik kerakmi (tarmoq yoki Viewer ulgurmayapti).
     pub fn should_skip(&self) -> bool {
         self.in_flight() > self.allowed_in_flight() || self.viewer_queue.load(Ordering::Relaxed) >= VIEWER_QUEUE_LIMIT
@@ -110,6 +115,8 @@ pub struct ViewerFeedback {
     /// Oxirgi `Feedback` dan keyin yangi kadr keldi.
     dirty: AtomicBool,
     queued: AtomicI32,
+    /// Oxirgi yuborilgan `Feedback` dagi navbat uzunligi.
+    last_sent_queue: AtomicU8,
     want_key: AtomicBool,
     need_key: AtomicBool,
     last_key_request: Mutex<Option<Instant>>,
@@ -121,6 +128,7 @@ impl Default for ViewerFeedback {
             last_pts: AtomicU64::new(0),
             dirty: AtomicBool::new(false),
             queued: AtomicI32::new(0),
+            last_sent_queue: AtomicU8::new(0),
             want_key: AtomicBool::new(false),
             // Oqim boshida birinchi kalit kadrgacha hech narsa dekodlanmaydi
             need_key: AtomicBool::new(true),
@@ -135,6 +143,7 @@ impl ViewerFeedback {
         self.last_pts.store(0, Ordering::Relaxed);
         self.dirty.store(false, Ordering::Relaxed);
         self.queued.store(0, Ordering::Relaxed);
+        self.last_sent_queue.store(0, Ordering::Relaxed);
         self.want_key.store(false, Ordering::Relaxed);
         self.need_key.store(true, Ordering::Relaxed);
         *lock(&self.last_key_request) = None;
@@ -156,14 +165,26 @@ impl ViewerFeedback {
     }
 
     /// Kadr dekoder navbatiga qo'yildi / navbatdan olindi.
+    ///
+    /// `queued()` kadr navbatga **qo'yilishidan oldin** chaqiriladi (aks holda dekoder `dequeued()` ni oldin
+    /// chaqirib, hisoblagich doimiy +1 ga siljib qolardi). Qo'yib bo'lmasa `dequeued()` bilan qaytariladi.
     pub fn queued(&self) {
         self.queued.fetch_add(1, Ordering::Relaxed);
     }
+    #[allow(deprecated)] // `try_update` yangi toolchain'larda; `fetch_update` hammasida ishlaydi
     pub fn dequeued(&self) {
-        // reset() dan keyin manfiyga tushmasin (kichik poyga zararsiz: faqat taxminiy navbat uzunligi)
-        if self.queued.fetch_sub(1, Ordering::Relaxed) <= 0 {
-            self.queued.store(0, Ordering::Relaxed);
-        }
+        // reset() dan keyin manfiyga tushmasin
+        let _ = self.queued.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some((v - 1).max(0)));
+    }
+
+    /// Hozirgi dekoder navbati uzunligi (diagnostika uchun).
+    pub fn queue_len(&self) -> i32 {
+        self.queued.load(Ordering::Relaxed)
+    }
+
+    /// Keyingi kalit kadr kutilmoqdami (diagnostika uchun).
+    pub fn needs_key(&self) -> bool {
+        self.need_key.load(Ordering::Relaxed)
     }
 
     /// Zanjir uzildi (kadr tashlandi yoki dekodlash xatosi): keyingi kalit kadrgacha kadrlar tashlanadi va Host'dan
@@ -174,11 +195,16 @@ impl ViewerFeedback {
     }
 
     /// Control oqimiga yuborish kerak bo'lgan `Feedback` (oxirgi yuborilgandan keyin yangi kadr kelgan bo'lsa).
+    ///
+    /// Navbat uzunligi o'zgargan bo'lsa ham yuboriladi: aks holda Host `queue >= 4` ni eslab qolib kodlashni
+    /// to'xtatadi, yangi kadr kelmagani uchun Feedback ham yuborilmaydi va oqim abadiy qotib qoladi.
     pub fn take_feedback(&self) -> Option<(u64, u8)> {
-        if !self.dirty.swap(false, Ordering::Relaxed) {
+        let q = self.queued.load(Ordering::Relaxed).clamp(0, 255) as u8;
+        let dirty = self.dirty.swap(false, Ordering::Relaxed);
+        let last_q = self.last_sent_queue.swap(q, Ordering::Relaxed);
+        if !dirty && q == last_q {
             return None;
         }
-        let q = self.queued.load(Ordering::Relaxed).clamp(0, 255) as u8;
         Some((self.last_pts.load(Ordering::Relaxed), q))
     }
 
@@ -210,9 +236,74 @@ pub fn coalesce_inputs(events: impl IntoIterator<Item = InputEvent>) -> Vec<Inpu
     out
 }
 
+/// Host tomoni: sessiya davomida Viewer bosib turgan klavish va sichqoncha tugmalari.
+///
+/// Aloqa klavish bosilgan paytda uzilsa (masalan Ctrl yoki sudrash paytidagi chap tugma), "qo'yib yuborish" hodisasi
+/// hech qachon kelmaydi va Host kompyuterida klavish bosilgancha qolib ketadi. Sessiya tugaganda `release_all`
+/// qaytargan hodisalar bajarilsa, hammasi qo'yib yuboriladi.
+#[derive(Default)]
+pub struct PressedInputs {
+    keys: BTreeSet<u32>,
+    buttons: BTreeSet<u8>,
+}
+
+impl PressedInputs {
+    /// Bir vaqtda bosilgan klavishlar chegarasi (noto'g'ri ishlayotgan Viewer xotirani to'ldirmasin).
+    const MAX_KEYS: usize = 256;
+
+    /// Viewer'dan kelgan hodisani hisobga oladi (bajarishdan oldin chaqiriladi).
+    pub fn track(&mut self, ev: &InputEvent) {
+        match *ev {
+            InputEvent::Key { code, pressed: true } => {
+                if self.keys.len() < Self::MAX_KEYS {
+                    self.keys.insert(code);
+                }
+            }
+            InputEvent::Key { code, pressed: false } => {
+                self.keys.remove(&code);
+            }
+            InputEvent::Button { button, pressed: true } => {
+                self.buttons.insert(button);
+            }
+            InputEvent::Button { button, pressed: false } => {
+                self.buttons.remove(&button);
+            }
+            InputEvent::PointerMove { .. } | InputEvent::Scroll { .. } => {}
+        }
+    }
+
+    /// Hozir bosilgan hamma narsa uchun "qo'yib yuborish" hodisalari; holat tozalanadi.
+    pub fn release_all(&mut self) -> Vec<InputEvent> {
+        let mut out: Vec<InputEvent> =
+            std::mem::take(&mut self.buttons).into_iter().map(|button| InputEvent::Button { button, pressed: false }).collect();
+        out.extend(std::mem::take(&mut self.keys).into_iter().map(|code| InputEvent::Key { code, pressed: false }));
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pressed_inputs_are_released_once() {
+        use InputEvent::*;
+        let mut p = PressedInputs::default();
+        for ev in [
+            Key { code: 29, pressed: true },
+            Key { code: 30, pressed: true },
+            Key { code: 30, pressed: false },
+            Button { button: 0, pressed: true },
+            Button { button: 1, pressed: true },
+            Button { button: 1, pressed: false },
+            PointerMove { x: 1, y: 2 },
+            Scroll { dx: 0, dy: 1 },
+        ] {
+            p.track(&ev);
+        }
+        assert_eq!(p.release_all(), vec![Button { button: 0, pressed: false }, Key { code: 29, pressed: false }]);
+        assert!(p.release_all().is_empty());
+    }
 
     #[test]
     fn in_flight_is_cleared_by_feedback() {
@@ -287,6 +378,39 @@ mod tests {
         f.dequeued();
         f.frame_received(78);
         assert_eq!(f.take_feedback(), Some((78, 0)));
+    }
+
+    #[test]
+    fn queue_drain_is_reported_without_new_frames() {
+        // Host `queue >= 4` ni ko'rib kodlashni to'xtatadi; yangi kadr kelmasa ham navbat bo'shaganini bildirish kerak.
+        let host = VideoControl::new(30);
+        let f = ViewerFeedback::default();
+        for pts in 1..=4 {
+            f.queued();
+            f.frame_received(pts);
+        }
+        let (pts, q) = f.take_feedback().unwrap();
+        host.on_feedback(pts, q);
+        assert!(host.should_skip());
+        assert_eq!(f.take_feedback(), None);
+        for _ in 0..4 {
+            f.dequeued();
+        }
+        let (pts, q) = f.take_feedback().expect("navbat bo'shadi: Feedback yuborilishi kerak");
+        host.on_feedback(pts, q);
+        assert!(!host.should_skip());
+    }
+
+    #[test]
+    fn queue_counter_never_leaks_when_decoder_is_faster() {
+        let f = ViewerFeedback::default();
+        // Dekoder `dequeued()` ni `queued()` dan oldin chaqirishi mumkin emas (queued send'dan oldin), lekin
+        // ortiqcha `dequeued()` (reset() dan keyin) hisobni manfiyga tushirmasligi kerak.
+        f.dequeued();
+        f.queued();
+        assert_eq!(f.queue_len(), 1);
+        f.dequeued();
+        assert_eq!(f.queue_len(), 0);
     }
 
     #[test]

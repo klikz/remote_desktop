@@ -11,6 +11,8 @@
 #   make mobileRun    APK yig'ish, telefon/emulyatorga o'rnatish va ishga tushirish
 #   make mobileKeystore  Android release imzo kalitini yaratish (bir marta)
 #   make mobileRelease   imzolangan release APK va AAB
+#   Versiya: buildWin/mobileBuild/mobileRelease har safar patch'ni oshiradi (0.1.0 -> 0.1.1 ...), scripts/bump-version.sh
+#   builds/ papkasi ham gitga yuklanadi (make push / autopush)
 #   make clean    build fayllarini o'chirish
 #   NO_HOST=1 make   GStreamer dev paketlarisiz (faqat Viewer)
 
@@ -68,6 +70,7 @@ clean:
 # --- Windows (Git Bash / make bilan) -------------------------------------------------------------
 
 buildWin:
+	@$(MOBILE_BASH) scripts/bump-version.sh
 	cargo build --release -p viewer
 	@$(MOBILE_BASH) -c "mkdir -p builds && cp -f target/release/viewer.exe builds/ulan_desk.exe && echo Tayyor: builds/ulan_desk.exe"
 
@@ -77,6 +80,7 @@ runWin:
 # --- Android (mobile_viewer/) --------------------------------------------------------------------
 
 mobileBuild:
+	@$(MOBILE_BASH) scripts/bump-version.sh
 	$(MOBILE_BASH) scripts/mobile.sh build
 
 mobileRun:
@@ -86,4 +90,5 @@ mobileKeystore:
 	$(MOBILE_BASH) scripts/mobile.sh keystore
 
 mobileRelease:
+	@$(MOBILE_BASH) scripts/bump-version.sh
 	$(MOBILE_BASH) scripts/mobile.sh release

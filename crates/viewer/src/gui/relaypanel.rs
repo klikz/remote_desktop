@@ -369,20 +369,12 @@ impl RelayPanel {
             self.status = "server manzilini kiriting".into();
             return;
         }
-        let known_hosts = match paths::known_hosts_file() {
-            Ok(p) => p,
-            Err(e) => {
-                self.status = format!("sozlama papkasi topilmadi: {e:#}");
-                return;
-            }
-        };
         let cfg = AgentConfig {
             server: self.cfg.server_addr(),
             key: self.cfg.key.clone(),
             name: self.cfg.name.clone(),
             id: self.cfg.id.clone(),
             token: self.cfg.token.clone(),
-            known_hosts,
             host_port: None,
         };
         let policy = Policy {

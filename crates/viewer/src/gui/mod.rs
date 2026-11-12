@@ -1,5 +1,5 @@
 //! Viewer'ning oynali interfeysi (egui): ulanish oynasi, saqlangan Host'lar, sifat sozlamalari,
-//! fingerprint tasdig'i va ulanish ichidagi panel.
+//! va ulanish ichidagi panel.
 
 mod firewall;
 mod hostpanel;
@@ -13,6 +13,7 @@ mod ondemand;
 #[cfg(target_os = "linux")]
 mod linuxhost;
 mod relaypanel;
+mod secrets;
 mod session;
 mod theme;
 mod welcome;
@@ -23,7 +24,7 @@ use egui::{Align, Align2, Color32, Key, Layout, RichText, Sense, TextureHandle, 
 use hosts::SavedHost;
 use rdcore::client::Transport;
 use std::{
-    sync::{atomic::Ordering, mpsc},
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
@@ -118,6 +119,14 @@ struct Form {
     height: u16,
     input: bool,
     save: bool,
+    /// Kalitni shu ulanish uchun xavfsiz saqlash (`secrets`).
+    save_key: bool,
+}
+
+/// `RD_DIAG=1` bo'lsa viewer diagnostika chipi va konsol loglarini ko'rsatadi.
+fn diag_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("RD_DIAG").is_some())
 }
 
 struct Stats {
@@ -126,6 +135,10 @@ struct Stats {
     bytes: u64,
     fps: f64,
     kbps: f64,
+    /// Diagnostika (`RD_DIAG`): dekodlangan kadrlar va ularning tezligi, oxirgi kadr kelgan vaqt.
+    decoded: u64,
+    dec_fps: f64,
+    last_frame: Instant,
 }
 
 /// Fayl uzatish qatori (ulanish ichidagi "Fayllar" panelida).
@@ -187,8 +200,10 @@ struct App {
     /// Aloqa uzildi va avtomatik qayta ulanilmoqda: (urinish, sabab).
     reconnecting: Option<(u32, String)>,
     handle: Option<session::Handle>,
-    confirm: Option<(String, mpsc::Sender<bool>)>,
-    fingerprint: String,
+    /// Host bilan autentifikatsiya o'tdi (video hali kelmagan bo'lishi mumkin).
+    authed: bool,
+    /// Boshlangan P2P ulanish kaliti: (yozuv, kalit, saqlansinmi). Kalit to'g'ri chiqqach saqlanadi yoki o'chiriladi.
+    pending_key: Option<(String, String, bool)>,
     title: String,
     input_on: bool,
     tex: Option<TextureHandle>,
@@ -230,18 +245,28 @@ impl App {
                 height: 1080,
                 input: true,
                 save: true,
+                save_key: false,
             },
+            pending_key: None,
             error: None,
             refused: None,
             reconnecting: None,
             handle: None,
-            confirm: None,
-            fingerprint: String::new(),
+            authed: false,
             title: String::new(),
             input_on: true,
             tex: None,
             fwd: input::Forwarder::default(),
-            stats: Stats { last: Instant::now(), frames: 0, bytes: 0, fps: 0.0, kbps: 0.0 },
+            stats: Stats {
+                last: Instant::now(),
+                frames: 0,
+                bytes: 0,
+                fps: 0.0,
+                kbps: 0.0,
+                decoded: 0,
+                dec_fps: 0.0,
+                last_frame: Instant::now(),
+            },
             #[cfg(windows)]
             tray: tray::Tray::new(&cc.egui_ctx),
             hidden: false,
@@ -271,7 +296,10 @@ impl App {
             self.form.kbps = h.kbps;
             self.form.height = h.height;
             self.form.input = h.input;
-            self.form.password.clear();
+            // Shu ulanish uchun saqlangan kalit bo'lsa maydonga qo'yiladi
+            let saved = secrets::get(&secrets::p2p_key(&self.full_addr()));
+            self.form.save_key = saved.is_some();
+            self.form.password = saved.unwrap_or_default();
         }
     }
 
@@ -293,7 +321,7 @@ impl App {
             return;
         }
         self.error = None;
-        self.fingerprint.clear();
+        self.authed = false;
         if self.form.port.trim().parse::<u16>().is_err() && !f.addr.contains(':') {
             self.error = Some("Port 1 dan 65535 gacha son bo'lishi kerak".into());
             return;
@@ -303,6 +331,7 @@ impl App {
         self.tex = None;
         self.fwd = input::Forwarder::default();
         self.relay_target = None;
+        self.pending_key = Some((secrets::p2p_key(&full), f.password.clone(), f.save_key));
         self.handle = Some(session::start(
             ctx.clone(),
             session::Params {
@@ -327,12 +356,13 @@ impl App {
         self.relay.set_error(None);
         let f = &self.form;
         self.error = None;
-        self.fingerprint.clear();
+        self.authed = false;
         self.title = format!("ID {}", rdcore::relay::pretty_id(&req.id));
         self.input_on = f.input;
         self.tex = None;
         self.fwd = input::Forwarder::default();
         self.relay_target = Some(req.id.clone());
+        self.pending_key = None;
         self.handle = Some(session::start(
             ctx.clone(),
             session::Params {
@@ -383,7 +413,6 @@ impl App {
             h.close();
         }
         self.handle = None;
-        self.confirm = None;
         self.refused = None;
         self.reconnecting = None;
         self.tex = None;
@@ -399,13 +428,12 @@ impl App {
         if let Some(h) = &self.handle {
             while let Ok(ev) = h.events.try_recv() {
                 match ev {
-                    session::Event::Confirm(fp, tx) => self.confirm = Some((fp, tx)),
-                    session::Event::Connected { fingerprint, via_tcp } => {
+                    session::Event::Connected { via_tcp } => {
                         let reconnect = self.reconnecting.is_some();
                         if via_tcp && !self.title.ends_with(" [TCP]") {
                             self.title.push_str(" [TCP]");
                         }
-                        self.fingerprint = fingerprint;
+                        self.authed = true;
                         // qayta ulanishda Host ro'yxati qaytadan saqlanmaydi
                         connected = !reconnect;
                     }
@@ -446,7 +474,19 @@ impl App {
             // parol to'g'ri, Host ishonchli: ro'yxatga saqlanadi (yoki sozlamalari yangilanadi)
             match self.relay_target.clone() {
                 Some(id) => self.relay.remember_contact(&id),
-                None => self.remember_host(),
+                None => {
+                    self.remember_host();
+                    // Kalit to'g'ri: belgilangan bo'lsa faqat shu ulanish uchun saqlanadi, aks holda eski yozuv o'chiriladi
+                    if let Some((conn, pw, save)) = self.pending_key.take() {
+                        if save && self.form.save {
+                            if let Err(e) = secrets::set(&conn, &pw) {
+                                eprintln!("{e}");
+                            }
+                        } else {
+                            secrets::delete(&conn);
+                        }
+                    }
+                }
             }
         }
         if let Some(msg) = ended {
@@ -612,7 +652,7 @@ impl App {
                     Some(h) => h.name.clone(),
                     None => "Yangi ulanish".to_string(),
                 };
-                theme::page_title(ui, &title, &["Host manzili va kalitini kiriting. Kalit hech qayerda saqlanmaydi."]);
+                theme::page_title(ui, &title, &["Host manzili va kalitini kiriting. Kalit faqat \"Saqlash\" belgilansa saqlanadi (shifrlangan holda)."]);
 
                 let mut pw_enter = false;
                 theme::card(ui, Some("HOST"), |ui| {
@@ -635,6 +675,11 @@ impl App {
                             if theme::button(ui, eye).clicked() {
                                 self.form.show_password = !self.form.show_password;
                             }
+                            ui.add_enabled_ui(secrets::available() && self.form.save, |ui| {
+                                ui.checkbox(&mut self.form.save_key, "Saqlash")
+                                    .on_hover_text("Kalit faqat shu ulanish uchun, shifrlangan holda saqlanadi")
+                                    .on_disabled_hover_text("\"Ro'yxatga saqlash\" yoqilgan va tizim kalit ombori mavjud bo'lishi kerak");
+                            });
                         });
                         ui.end_row();
                     });
@@ -688,7 +733,8 @@ impl App {
 
         if let Some(i) = delete {
             if i < self.hosts.len() {
-                self.hosts.remove(i);
+                let removed = self.hosts.remove(i);
+                secrets::delete(&secrets::p2p_key(&removed.addr));
                 self.selected = None;
                 let _ = hosts::save(&self.hosts);
             }
@@ -704,6 +750,7 @@ impl App {
             self.form.name.clear();
             self.form.addr.clear();
             self.form.password.clear();
+            self.form.save_key = false;
             self.form.port = protocol::DEFAULT_PORT.to_string();
             self.error = None;
         }
@@ -724,14 +771,14 @@ impl App {
                 }
                 let what = if self.refused.is_some() {
                     "Ekran olinmadi"
-                } else if self.fingerprint.is_empty() {
+                } else if !self.authed {
                     "Ulanilmoqda"
                 } else {
                     "Video kutilmoqda"
                 };
                 ui.label(RichText::new(what).size(17.0).strong());
                 ui.label(theme::dim(&self.title));
-                if self.relay_target.is_some() && self.fingerprint.is_empty() {
+                if self.relay_target.is_some() && !self.authed {
                     theme::hint(ui, "Qabul qiluvchi ruxsat berishi kutilmoqda (30 soniyagacha)");
                 }
                 if let Some(msg) = &self.refused {
@@ -757,46 +804,6 @@ impl App {
         }
     }
 
-    fn ui_confirm(&mut self, ctx: &egui::Context) {
-        let Some((fp, _)) = &self.confirm else { return };
-        let fp = fp.clone();
-        let mut answer = None;
-        egui::Window::new("Yangi Host")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.label("Bu Host'ga birinchi marta ulanyapsiz.");
-                theme::hint(ui, "Fingerprint'ni Host ekranidagi qiymat bilan solishtiring:");
-                ui.add_space(6.0);
-                let half = fp.len() / 2;
-                let split = fp[..half].rfind(':').map(|i| i + 1).unwrap_or(half);
-                egui::Frame::none()
-                    .fill(theme::BG)
-                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
-                    .rounding(egui::Rounding::same(8.0))
-                    .inner_margin(egui::Margin::same(10.0))
-                    .show(ui, |ui| {
-                        ui.monospace(&fp[..split]);
-                        ui.monospace(&fp[split..]);
-                    });
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    if theme::accent_button(ui, "Ha, ishonaman", egui::vec2(140.0, 32.0), true).clicked() {
-                        answer = Some(true);
-                    }
-                    if ui.add(egui::Button::new("Yo'q").min_size(egui::vec2(80.0, 32.0))).clicked() {
-                        answer = Some(false);
-                    }
-                });
-            });
-        if let Some(a) = answer {
-            if let Some((_, tx)) = self.confirm.take() {
-                let _ = tx.send(a);
-            }
-        }
-    }
-
     fn ui_viewing(&mut self, ctx: &egui::Context) {
         let Some(handle) = &self.handle else { return };
         let shared = handle.shared.clone();
@@ -808,9 +815,27 @@ impl App {
             let bytes = shared.bytes.load(Ordering::Relaxed);
             self.stats.fps = (frames - self.stats.frames.min(frames)) as f64 / secs;
             self.stats.kbps = (bytes - self.stats.bytes.min(bytes)) as f64 * 8.0 / 1000.0 / secs;
+            let decoded = shared.decoded.load(Ordering::Relaxed);
+            self.stats.dec_fps = (decoded - self.stats.decoded.min(decoded)) as f64 / secs;
+            self.stats.decoded = decoded;
+            if frames != self.stats.frames {
+                self.stats.last_frame = Instant::now();
+            }
             self.stats.frames = frames;
             self.stats.bytes = bytes;
             self.stats.last = Instant::now();
+            if diag_enabled() {
+                eprintln!(
+                    "[diag] recv {:.0} fps, dec {:.0} fps, {:.2} Mbit/s, queue {}, need_key {}, rtt {:.0} ms, oxirgi kadr {:.1}s oldin",
+                    self.stats.fps,
+                    self.stats.dec_fps,
+                    self.stats.kbps / 1000.0,
+                    shared.queue.load(Ordering::Relaxed),
+                    shared.need_key.load(Ordering::Relaxed),
+                    shared.rtt_us.load(Ordering::Relaxed) as f64 / 1000.0,
+                    self.stats.last_frame.elapsed().as_secs_f64(),
+                );
+            }
         }
         let rtt = shared.rtt_us.load(Ordering::Relaxed) as f64 / 1000.0;
 
@@ -836,6 +861,19 @@ impl App {
                     theme::chip(ui, format!("{:.0} FPS", self.stats.fps), theme::DIM);
                     theme::chip(ui, format!("{:.1} Mbit/s", self.stats.kbps / 1000.0), theme::DIM);
                     theme::chip(ui, format!("{:.0} ms", rtt), rtt_color);
+                    if diag_enabled() {
+                        theme::chip(
+                            ui,
+                            format!(
+                                "dec {:.0} · q {} · key {} · {:.0}s",
+                                self.stats.dec_fps,
+                                shared.queue.load(Ordering::Relaxed),
+                                if shared.need_key.load(Ordering::Relaxed) { "kutilmoqda" } else { "ok" },
+                                self.stats.last_frame.elapsed().as_secs_f64(),
+                            ),
+                            theme::DIM,
+                        );
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if theme::danger_button(ui, "Uzish").clicked() {
                             want_disconnect = true;
@@ -1090,8 +1128,28 @@ impl App {
     fn tray_update(&mut self, _ctx: &egui::Context) {}
 }
 
+/// Diagnostika: `ULAN_FPS_DEBUG=1` bo'lsa soniyasiga `update()` chaqiruvlari sonini stderr ga chiqaradi.
+fn fps_debug(hidden: bool, welcome: bool) {
+    use std::sync::{atomic::{AtomicU32, Ordering::Relaxed}, Mutex, OnceLock};
+    static ON: OnceLock<bool> = OnceLock::new();
+    static COUNT: AtomicU32 = AtomicU32::new(0);
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    if !*ON.get_or_init(|| std::env::var_os("ULAN_FPS_DEBUG").is_some()) {
+        return;
+    }
+    COUNT.fetch_add(1, Relaxed);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    let t = last.get_or_insert(now);
+    if now.duration_since(*t) >= Duration::from_secs(1) {
+        eprintln!("[fps] update/s={} hidden={hidden} welcome={welcome}", COUNT.swap(0, Relaxed));
+        *last = Some(now);
+    }
+}
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        fps_debug(self.hidden, self.welcome.is_some());
         if std::mem::take(&mut self.start_minimized) {
             ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
         }
@@ -1103,7 +1161,6 @@ impl eframe::App for App {
             Screen::Connecting => self.ui_connecting(ctx),
             Screen::Viewing => self.ui_viewing(ctx),
         }
-        self.ui_confirm(ctx);
         if self.welcome.as_mut().is_some_and(|w| !w.show(ctx)) {
             self.welcome = None;
         }

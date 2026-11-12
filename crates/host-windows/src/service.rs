@@ -8,8 +8,7 @@ use rdcore::{
     auth::Credentials,
     cert::HostIdentity,
     framing::{read_message, write_message},
-    hexfmt,
-    pacing::VideoControl,
+    pacing::{PressedInputs, VideoControl},
     paths,
     server::{Handler, Host, SessionIo},
 };
@@ -90,8 +89,7 @@ async fn run_host(args: &[String]) -> Result<()> {
     let host = bind_host(ip, port, None)?;
     let _tcp = host.spawn_tcp_tunnel();
     println!("Host ishga tushdi: {} (UDP)", host.local_addr()?);
-    println!("Fingerprint: {}", hexfmt::colon(&host.fingerprint()));
-    println!("Viewer birinchi ulanishda shu fingerprint'ni tasdiqlaydi. To'xtatish: Ctrl+C");
+    println!("To'xtatish: Ctrl+C");
     host.run_with(make_handler(Arc::new(Shared::default()))).await
 }
 
@@ -139,7 +137,6 @@ pub struct PeerInfo {
 /// Dastur ichida ishlayotgan Host. `stop()` yoki `drop` uni to'xtatadi va portni bo'shatadi.
 pub struct RunningHost {
     pub port: u16,
-    pub fingerprint: String,
     shared: Arc<Shared>,
     stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -157,7 +154,7 @@ impl RunningHost {
 
     fn start_with(ip: IpAddr, port: u16, creds: Option<Credentials>) -> Result<RunningHost> {
         dpi_aware();
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<std::result::Result<(String, u16), String>>();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<std::result::Result<u16, String>>();
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
         let shared = Arc::new(Shared::default());
         let sh = shared.clone();
@@ -179,7 +176,7 @@ impl RunningHost {
                 };
                 let _tcp = host.spawn_tcp_tunnel();
                 let bound = host.local_addr().map(|a| a.port()).unwrap_or(port);
-                let _ = ready_tx.send(Ok((hexfmt::colon(&host.fingerprint()), bound)));
+                let _ = ready_tx.send(Ok(bound));
                 tokio::select! {
                     r = host.run_with(make_handler(sh.clone())) => {
                         if let Err(e) = r {
@@ -197,7 +194,7 @@ impl RunningHost {
             rt.shutdown_timeout(Duration::from_secs(2));
         });
         match ready_rx.recv_timeout(Duration::from_secs(10)) {
-            Ok(Ok((fingerprint, port))) => Ok(RunningHost { port, fingerprint, shared, stop_tx: Some(stop_tx), thread: Some(thread) }),
+            Ok(Ok(port)) => Ok(RunningHost { port, shared, stop_tx: Some(stop_tx), thread: Some(thread) }),
             Ok(Err(e)) => {
                 let _ = thread.join();
                 Err(anyhow!(e))
@@ -268,6 +265,7 @@ async fn session(mut io: SessionIo, shared: Arc<Shared>) {
     shared.peers.lock().unwrap().push(Peer { id, ip: real_ip, via_tcp, since: Instant::now(), conn: io.conn.clone() });
     println!("[host] {real_ip}: ulandi{}", if via_tcp { " (TCP)" } else { "" });
     let mut video: Option<Video> = None;
+    let mut pressed = PressedInputs::default();
     let files = rdcore::filexfer::spawn_server(io.conn.clone());
     loop {
         match read_message(&mut io.recv).await {
@@ -289,7 +287,10 @@ async fn session(mut io: SessionIo, shared: Arc<Shared>) {
                     break;
                 }
             }
-            Ok(Message::Input(ev)) => input::apply(ev),
+            Ok(Message::Input(ev)) => {
+                pressed.track(&ev);
+                input::apply(ev);
+            }
             Ok(Message::RequestKeyframe) => {
                 if let Some(v) = &video {
                     v.ctl.request_keyframe();
@@ -307,6 +308,10 @@ async fn session(mut io: SessionIo, shared: Arc<Shared>) {
     files.abort();
     if let Some(v) = video {
         v.stop();
+    }
+    // Aloqa klavish/tugma bosilgan paytda uzilgan bo'lsa, ular Host'da bosilgancha qolib ketmasin
+    for ev in pressed.release_all() {
+        input::apply(ev);
     }
     shared.peers.lock().unwrap().retain(|p| p.id != id);
     println!("[host] {real_ip}: uzildi");

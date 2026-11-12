@@ -84,7 +84,7 @@ Bitta kod bazasi, ikki rol. Hozir: Linux = Host, Windows = Viewer.
 - [x] Binary serializatsiya: qo'lda yozilgan, tashqi kutubxonasiz, frame (u32 uzunlik) + xabar turi; `PROTOCOL_VERSION = 1`
 - [x] QUIC server (Host) va klient (Viewer): `rdcore::server`, `rdcore::client` (quinn 0.11, TLS 1.3). Hozircha faqat control oqimi
 - [x] Self-signed sertifikat yaratish va saqlash (Host): `rdcore::cert` (rcgen)
-- [x] Fingerprint ko'rsatish va "known hosts" saqlash (Viewer). `known_hosts` mantiqi tekshirilgan (3 test), ulanish bilan bog'lanishi loopback testlarda tasdiqlandi. Fingerprint o'zgarsa ulanish rad etiladi
+- [x] Fingerprint ko'rsatish va "known hosts" saqlash (Viewer). `known_hosts` mantiqi tekshirilgan (3 test), ulanish bilan bog'lanishi loopback testlarda tasdiqlandi. Fingerprint o'zgarsa ulanish rad etiladi (2026-11-12: olib tashlandi, foydalanuvchiga noqulay; sertifikat xeshi faqat parol isbotiga bog'lanadi)
 - [x] Parol autentifikatsiyasi: parol yuborilmaydi, `HMAC(argon2id(parol), nonce || fingerprint)` isboti yuboriladi (fingerprint bog'langani MITM'dan himoya qiladi). `rdcore::auth`
 - [x] Noto'g'ri urinishlarni cheklash: IP bo'yicha 10 daqiqada 5 xato -> 15 daqiqa blok. Mantiq tekshirilgan (5 test), Host'ga ulanishi loopback testda tasdiqlandi
 - [x] Capability: Host kodek, maksimal FPS va monitorlar ro'yxatini e'lon qiladi (monitorlar hozircha bo'sh). Viewer tanlovi Bosqich 5 da (Settings xabari)
@@ -256,9 +256,8 @@ end-to-end qoladi (server trafikni o'qiy olmaydi): server faqat ikki clientning 
 - [ ] Sinov: haqiqiy ikki kompyuter (Windows server + Ubuntu client), mobil tarmoq (simmetrik NAT), UI qo'lda
 - [ ] Relay serveriga TCP zaxira (UDP bloklangan tarmoqlar uchun clientdan serverga)
 - [ ] Ishlash o'lchovi: ichki QUIC tashqi oqim ustida (kechikish/yo'qotish); yomon bo'lsa QUIC datagram'ga o'tish
-- [ ] Xavfsizlik: serverning birinchi ulanishdagi fingerprint'i hozir avtomatik saqlanadi (TOFU); UI'da tasdiqlash oynasi qo'shish
 Qoldiq xavf: dialogli rejimda bir martalik parol server orqali o'tadi, shuning uchun serverga ishonish kerak (qarovsiz rejimda parol
-serverga hech qachon yuborilmaydi). Host fingerprint'i `id:<ID>` kaliti bilan birinchi ulanishda pin qilinadi.
+serverga hech qachon yuborilmaydi). Host va server sertifikati pin qilinmaydi (2026-11-12): soxta Host/server o'zini haqiqiydek ko'rsata oladi, lekin parol isbotini haqiqiy Host'ga uzata olmaydi.
 
 ### Bosqich 11. Audit: trafik, aloqa va CPU (2026-11-06)
 To'liq audit va reja: trafik isrofi (har soniyada IDR, o'zgarmagan ekranni kodlash, CBR), aloqa (ping kiritishni to'xtatardi,
@@ -345,3 +344,4 @@ har 3 s da `systemctl`, rang o'girish protsessorda). Protokol v2 (`PROTOCOL_VERS
 | 2026-10-31 | UI: "Ulanish" -> "P2P", server rejimi "HOST" bo'limiga ko'chdi; server kaliti ixtiyoriy (ochiq server himoyasi: IP bo'yicha yangi ID cheklovi, noto'g'ri ID urinishlari bloki); rdcore testlari o'tdi |
 | 2026-10-31 | Qarovsiz rejim: alohida parol (`unattended.key`, xesh) va talab bo'yicha Host (Windows: jarayon ichida loopback, Linux: o'rnatilgan binar `--password-file`); Host yoqilmagan bo'lsa ham ishlaydi. Windows tray ikonkasi (oyna yopilsa/pastga tushsa agent ishlashda qoladi). Linux tray hali yo'q; rdcore testlari o'tdi, qurilmada sinov kutilmoqda |
 | 2026-11-06 | Bosqich 11: audit (trafik, aloqa, CPU). Protokol v2 (kalit kadr so'rovi, Feedback, kechikish chegarasi), Linux/Windows Host kodlash tuzatishlari, ping o'rniga QUIC RTT, kiritishni birlashtirish, hodisaga asoslangan UI, mobil dekoder. `cargo test` (protocol, rdcore, viewer) va Linux uchun `cargo check` o'tdi, Android APK yig'ildi; qurilmalarda sinov kutilmoqda |
+| 2026-11-12 | Fingerprint tasdig'i va `known_hosts` olib tashlandi (Viewer, mobil, relay agenti). To'liq tekshiruv: mobil dekoder navbati hisoblagichi poygasi (video qotishi), Host'da bosilib qolgan klavishlar, atomik fayl yozish, Windows Host videosi vaqtinchalik xatolarga chidamli, TCP tunnel va dekoder tezlashtirildi. `cargo test --workspace` o'tdi; qurilmalarda sinov kutilmoqda |

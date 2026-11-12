@@ -6,7 +6,6 @@ use rdcore::{
     cert::HostIdentity,
     client::{connect, ConnectOptions},
     filexfer,
-    known_hosts::KnownHosts,
     server::{Handler, Host},
 };
 use std::sync::Arc;
@@ -34,8 +33,7 @@ async fn upload_list_download() {
     });
     tokio::spawn(host.run_with(handler));
 
-    let kh = KnownHosts::new(dir.join("known_hosts"));
-    let session = connect(ConnectOptions { addr, password: PASSWORD, known_hosts: &kh, confirm_new_host: &|_| true })
+    let session = connect(ConnectOptions { addr, password: PASSWORD })
         .await
         .unwrap();
     let conn = session.connection();

@@ -22,12 +22,11 @@ object Native {
     /** P2P (to'g'ridan-to'g'ri) sessiya: `addr` = `IP`, `IP:port` yoki `nom[:port]`. Agent shart emas. */
     external fun connectDirect(addr: String, password: String, fps: Int, kbps: Int, height: Int): Boolean
 
-    /** `confirm\tfp`, `connected\tfp\t0|1`, `video`, `reconnecting\tattempt\treason`, `ended\terror` yoki null. */
+    /** `connected\t0|1`, `video`, `reconnecting\tattempt\treason`, `ended\terror` yoki null. */
     external fun pollEvent(): String?
 
     /** Qurilma tarmog'i o'zgardi: agent va ochiq sessiya darrov qayta ulanadi. */
     external fun networkChanged()
-    external fun confirm(accept: Boolean)
 
     /**
      * Keyingi kadrni kutadi: `-1` = vaqt tugadi, aks holda `(baytlar shl 1) or kalit_kadr`.

@@ -118,10 +118,32 @@ pub fn scale_bgra(src: &[u8], sw: usize, sh: usize, tw: usize, th: usize, out: &
         out.copy_from_slice(&src[..sw * sh * 4]);
         return;
     }
-    for y in 0..th {
+    // Katta kadrlarda (4K -> 1080p: ~8 mln manba piksel) qatorlar bir nechta oqimga bo'linadi: bu sikl har kadrda
+    // ishlaydi va bitta yadroda kadr oralig'ining katta qismini egallaydi.
+    let threads = if tw * th >= 1280 * 720 {
+        std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 4)
+    } else {
+        1
+    };
+    if threads == 1 {
+        scale_rows(src, sw, sh, tw, th, 0, out);
+        return;
+    }
+    let rows_per = th.div_ceil(threads);
+    std::thread::scope(|s| {
+        for (i, chunk) in out.chunks_mut(rows_per * tw * 4).enumerate() {
+            s.spawn(move || scale_rows(src, sw, sh, tw, th, i * rows_per, chunk));
+        }
+    });
+}
+
+/// `out`: `y0` qatoridan boshlanadigan to'liq qatorlar (har biri `tw * 4` bayt).
+fn scale_rows(src: &[u8], sw: usize, sh: usize, tw: usize, th: usize, y0: usize, out: &mut [u8]) {
+    for (k, line) in out.chunks_exact_mut(tw * 4).enumerate() {
+        let y = y0 + k;
         let sy0 = y * sh / th;
         let sy1 = ((y + 1) * sh / th).clamp(sy0 + 1, sh);
-        for x in 0..tw {
+        for (x, px) in line.chunks_exact_mut(4).enumerate() {
             let sx0 = x * sw / tw;
             let sx1 = ((x + 1) * sw / tw).clamp(sx0 + 1, sw);
             let (mut b, mut g, mut r) = (0u32, 0u32, 0u32);
@@ -133,11 +155,35 @@ pub fn scale_bgra(src: &[u8], sw: usize, sh: usize, tw: usize, th: usize, out: &
                 }
             }
             let n = ((sy1 - sy0) * (sx1 - sx0)) as u32;
-            let o = (y * tw + x) * 4;
-            out[o] = (b / n) as u8;
-            out[o + 1] = (g / n) as u8;
-            out[o + 2] = (r / n) as u8;
-            out[o + 3] = 255;
+            px[0] = (b / n) as u8;
+            px[1] = (g / n) as u8;
+            px[2] = (r / n) as u8;
+            px[3] = 255;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parallel yo'l (katta kadr) bitta oqimdagi bilan bir xil natija beradi.
+    #[test]
+    fn parallel_scale_matches_single_thread() {
+        let (sw, sh, tw, th) = (2560usize, 1441usize, 1280usize, 720usize);
+        let src: Vec<u8> = (0..sw * sh * 4).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
+        let mut par = Vec::new();
+        scale_bgra(&src, sw, sh, tw, th, &mut par);
+        let mut one = vec![0u8; tw * th * 4];
+        scale_rows(&src, sw, sh, tw, th, 0, &mut one);
+        assert_eq!(par, one);
+    }
+
+    #[test]
+    fn same_size_is_copied() {
+        let src = vec![7u8; 4 * 2 * 4];
+        let mut out = Vec::new();
+        scale_bgra(&src, 4, 2, 4, 2, &mut out);
+        assert_eq!(out, src);
     }
 }

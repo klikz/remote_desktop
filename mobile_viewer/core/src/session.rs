@@ -3,15 +3,13 @@
 //!
 //! Aloqa uzilsa (tarmoq o'zgardi, vaqtincha internet yo'q, Host qayta ishga tushdi) sessiya darrov tugamaydi:
 //! `RECONNECT_WINDOW` ichida avtomatik qayta ulanishga urinadi (`Event::Reconnecting`). Doimiy xatolar
-//! (kalit noto'g'ri, fingerprint o'zgargan, Host ulanishni uzdi, foydalanuvchi yopdi) darrov tugatadi.
+//! (kalit noto'g'ri, Host ulanishni uzdi, foydalanuvchi yopdi) darrov tugatadi.
 
 use anyhow::Result;
 use protocol::{InputEvent, DEFAULT_PORT};
 use rdcore::{
     client::{connect_relayed, connect_with, ConnectOptions, Rejected, Transport, VideoRefused},
-    known_hosts::KnownHosts,
     pacing::{ViewerFeedback, FEEDBACK_INTERVAL},
-    paths,
     relay::agent::Connector,
 };
 use std::{
@@ -56,9 +54,7 @@ pub struct Stats {
 }
 
 pub enum Event {
-    /// Birinchi ulanish: fingerprint'ni foydalanuvchi tasdiqlashi kerak (`Sess::answer_confirm`).
-    Confirm(String),
-    Connected { fingerprint: String, via_tcp: bool },
+    Connected { via_tcp: bool },
     VideoStarted,
     /// Aloqa uzildi, avtomatik qayta ulanilmoqda (`attempt` 1 dan boshlanadi; `reason` = uzilish sababi).
     Reconnecting { attempt: u32, reason: String },
@@ -91,7 +87,6 @@ pub struct Sess {
     /// `wait_frame` olgan, lekin hali dekoder buferiga ko'chirilmagan kadr.
     pending: Mutex<Option<Frame>>,
     fb: Arc<ViewerFeedback>,
-    confirm: Arc<Mutex<Option<mpsc::Sender<bool>>>>,
     pub stats: Arc<Stats>,
 }
 
@@ -152,19 +147,11 @@ impl Sess {
     pub fn request_keyframe(&self) {
         self.fb.request_keyframe();
     }
-
-    pub fn answer_confirm(&self, accept: bool) {
-        if let Some(tx) = self.confirm.lock().ok().and_then(|mut c| c.take()) {
-            let _ = tx.send(accept);
-        }
-    }
 }
 
 impl Drop for Sess {
     fn drop(&mut self) {
         let _ = self.cmd.send(Cmd::Close);
-        // Kutayotgan fingerprint so'rovi bo'lsa, rad etiladi (oqim osilib qolmasligi uchun).
-        self.answer_confirm(false);
     }
 }
 
@@ -174,7 +161,6 @@ pub fn start(p: Params) -> Arc<Sess> {
     let (ev_tx, ev_rx) = mpsc::channel();
     let (frame_tx, frame_rx) = mpsc::sync_channel::<Frame>(8);
     let stats = Arc::new(Stats::default());
-    let confirm = Arc::new(Mutex::new(None));
     let fb = Arc::new(ViewerFeedback::default());
     let sess = Arc::new(Sess {
         cmd: cmd_tx,
@@ -183,12 +169,11 @@ pub fn start(p: Params) -> Arc<Sess> {
         frames: Mutex::new(frame_rx),
         pending: Mutex::new(None),
         fb: fb.clone(),
-        confirm: confirm.clone(),
         stats: stats.clone(),
     });
     std::thread::spawn(move || {
         let ended = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
-            Ok(rt) => rt.block_on(run(p, stats, ev_tx.clone(), confirm, frame_tx, cmd_rx, input_rx, fb)),
+            Ok(rt) => rt.block_on(run(p, stats, ev_tx.clone(), frame_tx, cmd_rx, input_rx, fb)),
             Err(e) => Err(e.into()),
         };
         let msg = match ended {
@@ -250,38 +235,22 @@ async fn run(
     p: Params,
     stats: Arc<Stats>,
     ev_tx: mpsc::Sender<Event>,
-    confirm_slot: Arc<Mutex<Option<mpsc::Sender<bool>>>>,
     frame_tx: mpsc::SyncSender<Frame>,
     mut cmd_rx: UnboundedReceiver<Cmd>,
     mut input_rx: UnboundedReceiver<InputEvent>,
     fb: Arc<ViewerFeedback>,
 ) -> Result<Option<String>> {
-    let known_hosts = KnownHosts::new(paths::known_hosts_file()?);
-
-    // Fingerprint tasdig'i: UI'ga so'rov yuboriladi va javob kutiladi (bu oqim faqat shu ulanishniki).
-    let confirm_tx = ev_tx.clone();
-    let confirm = move |fp: &str| -> bool {
-        let (tx, rx) = mpsc::channel();
-        if let Ok(mut slot) = confirm_slot.lock() {
-            *slot = Some(tx);
-        }
-        if confirm_tx.send(Event::Confirm(fp.to_string())).is_err() {
-            return false;
-        }
-        rx.recv().unwrap_or(false)
-    };
-
     // `ever`: sessiya kamida bir marta to'liq (video bilan) ochilgan; faqat shundan keyin qayta uriniladi.
     let mut ever = false;
     let mut deadline: Option<Instant> = None;
     let mut attempt = 0u32;
     loop {
         let mut up = false;
-        let end = match run_once(&p, &stats, &ev_tx, &confirm, &known_hosts, &frame_tx, &mut cmd_rx, &mut input_rx, &fb, &mut up)
+        let end = match run_once(&p, &stats, &ev_tx, &frame_tx, &mut cmd_rx, &mut input_rx, &fb, &mut up)
             .await
         {
             Ok(end) => end,
-            // Kalit rad etildi / fingerprint o'zgargan / Host videoni rad etdi: qayta urinish befoyda.
+            // Kalit rad etildi / Host videoni rad etdi: qayta urinish befoyda.
             Err(e) if e.downcast_ref::<Rejected>().is_some() || e.downcast_ref::<VideoRefused>().is_some() => return Err(e),
             Err(e) if ever => End::Lost(format!("{e:#}")),
             Err(e) => return Err(e),
@@ -319,8 +288,6 @@ async fn run_once(
     p: &Params,
     stats: &Arc<Stats>,
     ev_tx: &mpsc::Sender<Event>,
-    confirm: &dyn Fn(&str) -> bool,
-    known_hosts: &KnownHosts,
     frame_tx: &mpsc::SyncSender<Frame>,
     cmd_rx: &mut UnboundedReceiver<Cmd>,
     input_rx: &mut UnboundedReceiver<InputEvent>,
@@ -344,25 +311,17 @@ async fn run_once(
             if password.is_empty() {
                 return Ok(End::Fatal("Host kalit bermadi: kalitni kiriting".into()));
             }
-            connect_relayed(
-                ConnectOptions { addr: relayed.local, password: &password, known_hosts, confirm_new_host: confirm },
-                format!("id:{}", p.id),
-            )
-            .await?
+            connect_relayed(ConnectOptions { addr: relayed.local, password: &password }).await?
         }
         None => {
             if p.password.is_empty() {
                 return Ok(End::Fatal("kalitni kiriting".into()));
             }
             let addr = resolve(&p.addr).await?;
-            connect_with(
-                ConnectOptions { addr, password: &p.password, known_hosts, confirm_new_host: confirm },
-                Transport::Auto,
-            )
-            .await?
+            connect_with(ConnectOptions { addr, password: &p.password }, Transport::Auto).await?
         }
     };
-    let _ = ev_tx.send(Event::Connected { fingerprint: session.fingerprint.clone(), via_tcp: session.via_tcp });
+    let _ = ev_tx.send(Event::Connected { via_tcp: session.via_tcp });
 
     let mut stream = session.request_video(p.fps, p.kbps, p.height, 0).await?;
     let _ = ev_tx.send(Event::VideoStarted);
@@ -385,10 +344,16 @@ async fn run_once(
                     if !rx_fb.accept(f.keyframe) {
                         continue;
                     }
+                    // Navbatga qo'yishdan oldin sanaymiz: dekoder `dequeued()` ni tezroq chaqirsa hisob +1 ga
+                    // siljib qolardi (4 marta siljisa Host kodlashni butunlay to'xtatadi: video qotadi).
+                    rx_fb.queued();
                     match frame_tx.try_send(Frame { keyframe: f.keyframe, data: f.data }) {
-                        Ok(()) => rx_fb.queued(),
+                        Ok(()) => {}
                         // Dekoder ulgurmayapti: zanjir uzildi, kalit kadr kerak
-                        Err(TrySendError::Full(_)) => rx_fb.request_keyframe(),
+                        Err(TrySendError::Full(_)) => {
+                            rx_fb.dequeued();
+                            rx_fb.request_keyframe();
+                        }
                         Err(TrySendError::Disconnected(_)) => return None,
                     }
                 }

@@ -1,4 +1,4 @@
-//! Viewer tomoni: Host'ga ulanish, fingerprint tekshiruvi va autentifikatsiya.
+//! Viewer tomoni: Host'ga ulanish va autentifikatsiya.
 
 use anyhow::{anyhow, bail, Context, Result};
 use protocol::{
@@ -15,8 +15,6 @@ use crate::{
     auth,
     cert::sha256,
     framing::{read_message, write_message},
-    hexfmt,
-    known_hosts::{KnownHosts, Trust},
     tcp_tunnel, tls,
 };
 
@@ -29,9 +27,6 @@ const VIDEO_START_TIMEOUT: Duration = Duration::from_secs(20);
 pub struct ConnectOptions<'a> {
     pub addr: SocketAddr,
     pub password: &'a str,
-    pub known_hosts: &'a KnownHosts,
-    /// Birinchi ulanishda fingerprint ko'rsatiladi. `true` qaytarilsa, Host ishonchli deb saqlanadi.
-    pub confirm_new_host: &'a dyn Fn(&str) -> bool,
 }
 
 /// Ulanish transporti: QUIC (UDP) yoki UDP bloklangan tarmoqlar uchun TCP orqali tunnel.
@@ -56,7 +51,7 @@ impl std::fmt::Display for Unreachable {
 
 impl std::error::Error for Unreachable {}
 
-/// Host ulanishni doimiy rad etdi (kalit noto'g'ri, fingerprint o'zgargan, tasdiqlanmagan): qayta urinish foyda bermaydi.
+/// Host ulanishni doimiy rad etdi (kalit noto'g'ri, versiya mos emas): qayta urinish foyda bermaydi.
 #[derive(Debug)]
 pub struct Rejected(pub String);
 
@@ -77,8 +72,6 @@ pub struct Session {
     recv: quinn::RecvStream,
     next_ping: u64,
     pub host_caps: Capabilities,
-    /// Host sertifikati fingerprint'i (`AB:CD:...`).
-    pub fingerprint: String,
 }
 
 fn now_ms() -> u64 {
@@ -94,8 +87,8 @@ pub async fn connect_with(opts: ConnectOptions<'_>, transport: Transport) -> Res
         Transport::Udp => connect(opts).await,
         Transport::Tcp => connect_via_tcp(opts).await,
         Transport::Auto => {
-            let again = ConnectOptions { addr: opts.addr, password: opts.password, known_hosts: opts.known_hosts, confirm_new_host: opts.confirm_new_host };
-            match connect_keyed(opts, None, AUTO_UDP_TIMEOUT).await {
+            let again = ConnectOptions { addr: opts.addr, password: opts.password };
+            match connect_timed(opts, AUTO_UDP_TIMEOUT).await {
                 Err(e) if e.downcast_ref::<Unreachable>().is_some() => {
                     eprintln!("UDP orqali ulanib bo'lmadi, TCP sinab ko'riladi...");
                     connect_via_tcp(again).await.map_err(|e2| anyhow!("UDP: {e}\nTCP: {e2:#}"))
@@ -108,27 +101,25 @@ pub async fn connect_with(opts: ConnectOptions<'_>, transport: Transport) -> Res
 
 /// QUIC paketlarini TCP orqali tashib ulanadi (qarang: `tcp_tunnel`).
 pub async fn connect_via_tcp(opts: ConnectOptions<'_>) -> Result<Session> {
-    let key = opts.addr.to_string();
     let local = tcp_tunnel::connect(opts.addr).await?;
     let opts = ConnectOptions { addr: local, ..opts };
-    let mut s = connect_keyed(opts, Some(key), STEP_TIMEOUT).await?;
+    let mut s = connect_timed(opts, STEP_TIMEOUT).await?;
     s.via_tcp = true;
     Ok(s)
 }
 
-/// Relay serveri orqali ochilgan lokal UDP ko'prikka (`opts.addr`) ulanadi. `key`: known_hosts kaliti (`id:123456789`).
-pub async fn connect_relayed(opts: ConnectOptions<'_>, key: String) -> Result<Session> {
-    let mut s = connect_keyed(opts, Some(key), STEP_TIMEOUT).await?;
+/// Relay serveri orqali ochilgan lokal UDP ko'prikka (`opts.addr`) ulanadi.
+pub async fn connect_relayed(opts: ConnectOptions<'_>) -> Result<Session> {
+    let mut s = connect_timed(opts, STEP_TIMEOUT).await?;
     s.via_tcp = true;
     Ok(s)
 }
 
 pub async fn connect(opts: ConnectOptions<'_>) -> Result<Session> {
-    connect_keyed(opts, None, STEP_TIMEOUT).await
+    connect_timed(opts, STEP_TIMEOUT).await
 }
 
-/// `key`: known_hosts uchun manzil kaliti (TCP tunnelda haqiqiy manzil; aks holda `opts.addr`).
-async fn connect_keyed(opts: ConnectOptions<'_>, key: Option<String>, handshake_timeout: Duration) -> Result<Session> {
+async fn connect_timed(opts: ConnectOptions<'_>, handshake_timeout: Duration) -> Result<Session> {
     let bind: SocketAddr = if opts.addr.is_ipv6() {
         "[::]:0".parse()?
     } else {
@@ -141,7 +132,7 @@ async fn connect_keyed(opts: ConnectOptions<'_>, key: Option<String>, handshake_
     let connecting = endpoint
         .connect_with(cfg, opts.addr, protocol::SERVER_NAME)
         .context("ulanishni boshlab bo'lmadi")?;
-    let shown = key.clone().unwrap_or_else(|| opts.addr.to_string());
+    let shown = opts.addr;
     let conn = timeout(handshake_timeout, connecting)
         .await
         .map_err(|_| {
@@ -149,30 +140,13 @@ async fn connect_keyed(opts: ConnectOptions<'_>, key: Option<String>, handshake_
         })?
         .context("QUIC ulanishi muvaffaqiyatsiz")?;
 
-    // Fingerprint tekshiruvi: hech qanday maxfiy ma'lumot yuborilmasdan oldin.
+    // Sertifikat xeshi parol isbotiga bog'lanadi: vositachi isbotni haqiqiy Host'ga uzata olmaydi.
     let cert_der = seen
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take()
         .ok_or_else(|| anyhow!("Host sertifikati olinmadi"))?;
     let fp_bytes = sha256(&cert_der);
-    let fp = hexfmt::colon(&fp_bytes);
-    let key = key.unwrap_or_else(|| opts.addr.to_string());
-    match opts.known_hosts.check(&key, &fp)? {
-        Trust::Known => {}
-        Trust::Unknown => {
-            if !(opts.confirm_new_host)(&fp) {
-                return Err(Rejected("Host fingerprint'i tasdiqlanmadi, ulanish bekor qilindi".into()).into());
-            }
-            opts.known_hosts.add(&key, &fp)?;
-        }
-        Trust::Changed { expected } => {
-            return Err(Rejected(format!(
-                "DIQQAT: {key} uchun Host fingerprint'i o'zgargan!\n  saqlangan: {expected}\n  hozirgi:   {fp}\nBu vositachi hujumi (MITM) belgisi bo'lishi mumkin. Host sertifikatini o'zingiz almashtirgan bo'lsangiz, known_hosts faylidan shu qatorni o'chiring."
-            ))
-            .into());
-        }
-    }
 
     let (mut send, mut recv) = conn.open_bi().await.context("control oqimini ochib bo'lmadi")?;
     write_message(&mut send, &Message::ClientHello { version: PROTOCOL_VERSION }).await?;
@@ -219,7 +193,6 @@ async fn connect_keyed(opts: ConnectOptions<'_>, key: Option<String>, handshake_
         recv,
         next_ping: 1,
         host_caps,
-        fingerprint: fp,
     })
 }
 

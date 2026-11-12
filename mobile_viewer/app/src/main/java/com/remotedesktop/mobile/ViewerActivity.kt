@@ -1,7 +1,6 @@
 package com.remotedesktop.mobile
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
@@ -249,13 +248,6 @@ class ViewerActivity : Activity(), KeySink {
 
     private fun handleEvent(f: List<String>) {
         when (f[0]) {
-            "confirm" -> AlertDialog.Builder(this)
-                .setTitle("Yangi kompyuter")
-                .setMessage("Bu kompyuterga birinchi marta ulanyapsiz.\nFingerprint:\n${f.getOrElse(1) { "" }}\n\nIshonasizmi?")
-                .setCancelable(false)
-                .setPositiveButton("Ishonaman") { _, _ -> Native.confirm(true) }
-                .setNegativeButton("Bekor") { _, _ -> Native.confirm(false) }
-                .show()
             "connected" -> {
                 if (p2pAddr.isNotEmpty()) {
                     settings.addP2pHost(p2pAddr)

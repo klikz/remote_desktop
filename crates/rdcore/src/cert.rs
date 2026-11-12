@@ -1,4 +1,4 @@
-//! Host sertifikati (self-signed) va fingerprint.
+//! Host sertifikati (self-signed) va uning xeshi.
 
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};

@@ -8,8 +8,7 @@ use rdcore::{
     auth::Credentials,
     cert::HostIdentity,
     framing::{read_message, write_message},
-    hexfmt,
-    pacing::VideoControl,
+    pacing::{PressedInputs, VideoControl},
     paths,
     server::{Handler, Host, SessionIo},
 };
@@ -88,8 +87,6 @@ async fn run_host(args: &[String]) -> Result<()> {
     let host = Host::bind(SocketAddr::new(ip, port), &identity, creds, caps)?;
     let _tcp = host.spawn_tcp_tunnel();
     println!("Host ishga tushdi: {} (UDP)", host.local_addr()?);
-    println!("Fingerprint: {}", hexfmt::colon(&host.fingerprint()));
-    println!("Viewer birinchi ulanishda shu fingerprint'ni tasdiqlaydi.");
 
     let handler: Handler = Arc::new(move |io| {
         let portal = portal.clone();
@@ -103,6 +100,7 @@ async fn session(mut io: SessionIo, portal: Backend) {
     let mut video: Option<JoinHandle<()>> = None;
     // Joriy video oqimining boshqaruvi (kalit kadr so'rovi, Viewer javobi)
     let mut ctl: Option<Arc<VideoControl>> = None;
+    let mut pressed = PressedInputs::default();
     let files = rdcore::filexfer::spawn_server(io.conn.clone());
     loop {
         match read_message(&mut io.recv).await {
@@ -128,7 +126,10 @@ async fn session(mut io: SessionIo, portal: Backend) {
                     break;
                 }
             }
-            Ok(Message::Input(ev)) => portal.input(ev).await,
+            Ok(Message::Input(ev)) => {
+                pressed.track(&ev);
+                portal.input(ev).await;
+            }
             Ok(Message::RequestKeyframe) => {
                 if let Some(c) = &ctl {
                     c.request_keyframe();
@@ -150,6 +151,10 @@ async fn session(mut io: SessionIo, portal: Backend) {
     files.abort();
     if let Some(h) = video {
         h.abort(); // kodlagich ham to'xtaydi
+    }
+    // Aloqa klavish/tugma bosilgan paytda uzilgan bo'lsa, ular Host'da bosilgancha qolib ketmasin
+    for ev in pressed.release_all() {
+        portal.input(ev).await;
     }
     io.conn.close(0u32.into(), b"bye");
 }

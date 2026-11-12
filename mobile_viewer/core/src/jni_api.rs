@@ -8,7 +8,6 @@ use jni::{
 };
 use protocol::InputEvent;
 use rdcore::{
-    paths,
     relay::agent::{Agent, AgentConfig, AgentEvent, Policy},
 };
 use std::{
@@ -35,7 +34,7 @@ fn current() -> Option<Arc<Sess>> {
     lock(&SESSION).clone()
 }
 
-/// Ilovaning `files` papkasi: sozlamalar va known_hosts shu yerda saqlanadi.
+/// Ilovaning `files` papkasi: sozlamalar shu yerda saqlanadi.
 #[no_mangle]
 pub extern "system" fn Java_com_remotedesktop_mobile_Native_init(mut env: JNIEnv, _o: JObject, files_dir: JString) {
     let dir = s(&mut env, &files_dir);
@@ -59,8 +58,7 @@ pub extern "system" fn Java_com_remotedesktop_mobile_Native_startAgent(
     let name = s(&mut env, &name);
     let id = s(&mut env, &id);
     let token = s(&mut env, &token);
-    let Ok(known_hosts) = paths::known_hosts_file() else { return JNI_FALSE };
-    let cfg = AgentConfig { server: cfg_server, key, name, id, token, known_hosts, host_port: None };
+    let cfg = AgentConfig { server: cfg_server, key, name, id, token, host_port: None };
     *lock(&AGENT) = Some(Agent::start(cfg, Policy::default()));
     JNI_TRUE
 }
@@ -167,26 +165,18 @@ pub extern "system" fn Java_com_remotedesktop_mobile_Native_networkChanged(_env:
     }
 }
 
-/// Sessiya hodisasi: `confirm\tfp`, `connected\tfp\t0|1`, `video`, `reconnecting\tattempt\treason`, `ended\terror`;
+/// Sessiya hodisasi: `connected\t0|1`, `video`, `reconnecting\tattempt\treason`, `ended\terror`;
 /// yo'q bo'lsa null.
 #[no_mangle]
 pub extern "system" fn Java_com_remotedesktop_mobile_Native_pollEvent(mut env: JNIEnv, _o: JObject) -> jstring {
     let text = match current().and_then(|c| c.poll_event()) {
-        Some(Event::Confirm(fp)) => format!("confirm\t{fp}"),
-        Some(Event::Connected { fingerprint, via_tcp }) => format!("connected\t{fingerprint}\t{}", via_tcp as u8),
+        Some(Event::Connected { via_tcp }) => format!("connected\t{}", via_tcp as u8),
         Some(Event::VideoStarted) => "video".to_string(),
         Some(Event::Reconnecting { attempt, reason }) => format!("reconnecting\t{attempt}\t{}", reason.replace('\t', " ")),
         Some(Event::Ended(e)) => format!("ended\t{}", e.unwrap_or_default()),
         None => return std::ptr::null_mut(),
     };
     jstr(&mut env, &text)
-}
-
-#[no_mangle]
-pub extern "system" fn Java_com_remotedesktop_mobile_Native_confirm(_env: JNIEnv, _o: JObject, accept: jboolean) {
-    if let Some(c) = current() {
-        c.answer_confirm(accept != JNI_FALSE);
-    }
 }
 
 /// Keyingi kadrni kutadi: `-1` = vaqt tugadi, aks holda `(baytlar << 1) | kalit_kadr`. Kadr `copyFrame` yoki

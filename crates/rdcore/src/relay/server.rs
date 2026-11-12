@@ -109,10 +109,6 @@ impl ServerHandle {
         v.sort_by(|a, b| b.online.cmp(&a.online).then(b.last_seen.cmp(&a.last_seen)));
         v
     }
-
-    pub fn fingerprint(&self) -> [u8; 32] {
-        self.0.fingerprint
-    }
 }
 
 pub struct RelayServer {

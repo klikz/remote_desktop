@@ -7,9 +7,7 @@ use protocol::{video_reason, InputEvent, DEFAULT_PORT};
 use rdcore::{
     client::{connect_relayed, connect_with, ConnectOptions, Rejected, Transport, VideoRefused},
     filexfer,
-    known_hosts::KnownHosts,
     pacing::{ViewerFeedback, FEEDBACK_INTERVAL},
-    paths,
     relay::agent::Connector,
 };
 use std::{
@@ -49,12 +47,14 @@ pub struct Shared {
     pub frames: AtomicU64,
     pub bytes: AtomicU64,
     pub rtt_us: AtomicU64,
+    /// Diagnostika (`RD_DIAG`): dekodlangan kadrlar, dekoder navbati va kalit kadr kutilishi.
+    pub decoded: AtomicU64,
+    pub queue: AtomicU64,
+    pub need_key: std::sync::atomic::AtomicBool,
 }
 
 pub enum Event {
-    /// Birinchi ulanish: fingerprint'ni foydalanuvchi tasdiqlashi kerak.
-    Confirm(String, mpsc::Sender<bool>),
-    Connected { fingerprint: String, via_tcp: bool },
+    Connected { via_tcp: bool },
     VideoStarted,
     /// Host ekranni ola olmadi (xato matni). Ulanish ochiq: ruxsatni qaytadan berish mumkin.
     VideoRefused(String),
@@ -215,6 +215,9 @@ async fn resolve(target: &str) -> Result<SocketAddr> {
 /// Sessiya video bilan ochilgandan keyin aloqa uzilsa, shu vaqt ichida avtomatik qayta ulanishga uriniladi.
 const RECONNECT_WINDOW: Duration = Duration::from_secs(90);
 
+/// Dekoder ortda qolganda ham ekran kamida shu oraliqda yangilanadi.
+const MAX_SHOW_GAP: Duration = Duration::from_millis(100);
+
 /// Bitta ulanish urinishi qanday tugadi.
 enum End {
     /// Foydalanuvchi yopdi.
@@ -264,20 +267,6 @@ async fn run(
     mut cmd_rx: UnboundedReceiver<Cmd>,
     mut input_rx: UnboundedReceiver<InputEvent>,
 ) -> Result<Option<String>> {
-    let known_hosts = KnownHosts::new(paths::known_hosts_file()?);
-
-    // Fingerprint tasdig'i: UI'ga so'rov yuboriladi va javob kutiladi (bu oqim faqat shu ulanishniki).
-    let confirm_tx = ev_tx.clone();
-    let confirm_ctx = ctx.clone();
-    let confirm = move |fp: &str| -> bool {
-        let (tx, rx) = mpsc::channel();
-        if confirm_tx.send(Event::Confirm(fp.to_string(), tx)).is_err() {
-            return false;
-        }
-        confirm_ctx.request_repaint();
-        rx.recv().unwrap_or(false)
-    };
-
     let fb = Arc::new(ViewerFeedback::default());
 
     // Dekoder oqimi (qayta ulanishlarda ham bitta): eng yangi kadr `shared.picture` ga yoziladi. Xato bo'lsa keyingi
@@ -287,18 +276,31 @@ async fn run(
         let shared = shared.clone();
         let ctx = ctx.clone();
         let fb = fb.clone();
+        let (init_tx, init_rx) = mpsc::channel::<Result<(), String>>();
         std::thread::spawn(move || {
             let mut decoder = match Decoder::new() {
-                Ok(d) => d,
+                Ok(d) => {
+                    let _ = init_tx.send(Ok(()));
+                    d
+                }
                 Err(e) => {
-                    eprintln!("dekoder yaratilmadi: {e}");
+                    let _ = init_tx.send(Err(e.to_string()));
                     return;
                 }
             };
+            let mut shown = Instant::now();
             while let Ok(data) = frx.recv() {
                 fb.dequeued();
                 match decoder.decode(&data) {
                     Ok(Some(yuv)) => {
+                        shared.decoded.fetch_add(1, Ordering::Relaxed);
+                        // Navbatda yangiroq kadr turibdi: bu kadr ekranda darrov almashtiriladi. Rang o'girish (eng
+                        // qimmat qadam) o'tkazib yuboriladi, dekoder navbatni tezroq bo'shatadi va kechikish kamayadi.
+                        // Ekran baribir kamida `MAX_SHOW_GAP` da bir marta yangilanadi.
+                        if fb.queue_len() > 0 && shown.elapsed() < MAX_SHOW_GAP {
+                            continue;
+                        }
+                        shown = Instant::now();
                         let (w, h) = yuv.dimensions();
                         let pixels = super::yuv::to_color32((yuv.y(), yuv.u(), yuv.v()), yuv.strides(), (w, h));
                         let image = egui::ColorImage { size: [w, h], pixels };
@@ -313,6 +315,10 @@ async fn run(
                 }
             }
         });
+        // Dekoder ochilmasa sessiya jimgina yopilib qolmasin: sababi foydalanuvchiga ko'rsatiladi
+        if let Ok(Err(e)) = init_rx.recv() {
+            anyhow::bail!("H.264 dekoder yaratilmadi: {e}");
+        }
     }
 
     // `ever`: sessiya kamida bir marta to'liq (video bilan) ochilgan; faqat shundan keyin qayta uriniladi.
@@ -321,7 +327,7 @@ async fn run(
     let mut attempt = 0u32;
     loop {
         let mut up = false;
-        let res = run_once(&p, &ctx, &shared, &ev_tx, &confirm, &known_hosts, &ftx, &fb, &mut cmd_rx, &mut input_rx, &mut up).await;
+        let res = run_once(&p, &ctx, &shared, &ev_tx, &ftx, &fb, &mut cmd_rx, &mut input_rx, &mut up).await;
         if up {
             ever = true;
             deadline = None;
@@ -329,7 +335,7 @@ async fn run(
         }
         let end = match res {
             Ok(end) => end,
-            // Kalit rad etildi / fingerprint o'zgargan / Host videoni rad etdi: qayta urinish befoyda.
+            // Kalit rad etildi / Host videoni rad etdi: qayta urinish befoyda.
             Err(e) if e.downcast_ref::<Rejected>().is_some() || e.downcast_ref::<VideoRefused>().is_some() => return Err(e),
             Err(e) if ever => End::Lost(format!("{e:#}")),
             Err(e) => return Err(e),
@@ -364,8 +370,6 @@ async fn run_once(
     ctx: &egui::Context,
     shared: &Arc<Shared>,
     ev_tx: &mpsc::Sender<Event>,
-    confirm: &(dyn Fn(&str) -> bool + Sync),
-    known_hosts: &KnownHosts,
     ftx: &mpsc::SyncSender<Vec<u8>>,
     fb: &Arc<ViewerFeedback>,
     cmd_rx: &mut UnboundedReceiver<Cmd>,
@@ -389,19 +393,14 @@ async fn run_once(
             if password.is_empty() {
                 return Ok(End::Fatal("Host kalit bermadi: kalitni kiriting".into()));
             }
-            connect_relayed(
-                ConnectOptions { addr: relayed.local, password: &password, known_hosts, confirm_new_host: confirm },
-                format!("id:{id}"),
-            )
-            .await?
+            connect_relayed(ConnectOptions { addr: relayed.local, password: &password }).await?
         }
         None => {
             let addr = resolve(&p.addr).await?;
-            connect_with(ConnectOptions { addr, password: &p.password, known_hosts, confirm_new_host: confirm }, p.transport)
-                .await?
+            connect_with(ConnectOptions { addr, password: &p.password }, p.transport).await?
         }
     };
-    let _ = ev_tx.send(Event::Connected { fingerprint: session.fingerprint.clone(), via_tcp: session.via_tcp });
+    let _ = ev_tx.send(Event::Connected { via_tcp: session.via_tcp });
     ctx.request_repaint();
 
     // Host ekranni ola olmasa (ruxsat yo'q yoki noto'g'ri berilgan) ulanish uzilmaydi: foydalanuvchi
@@ -452,10 +451,15 @@ async fn run_once(
                     if !rx_fb.accept(f.keyframe) {
                         continue;
                     }
+                    // Navbatga qo'yishdan oldin sanaymiz: dekoder `dequeued()` ni tezroq chaqirsa ham hisob buzilmaydi
+                    rx_fb.queued();
                     match ftx.try_send(f.data) {
-                        Ok(()) => rx_fb.queued(),
+                        Ok(()) => {}
                         // Dekoder ulgurmayapti: zanjir uzildi, kalit kadr kerak
-                        Err(TrySendError::Full(_)) => rx_fb.request_keyframe(),
+                        Err(TrySendError::Full(_)) => {
+                            rx_fb.dequeued();
+                            rx_fb.request_keyframe();
+                        }
                         Err(TrySendError::Disconnected(_)) => return None,
                     }
                 }
@@ -508,6 +512,8 @@ async fn run_once(
                     }
                 }
                 ticks = ticks.wrapping_add(1);
+                shared.queue.store(fb.queue_len().max(0) as u64, Ordering::Relaxed);
+                shared.need_key.store(fb.needs_key(), Ordering::Relaxed);
                 if ticks % 20 == 0 {
                     shared.rtt_us.store(session.rtt().as_micros() as u64, Ordering::Relaxed);
                 }

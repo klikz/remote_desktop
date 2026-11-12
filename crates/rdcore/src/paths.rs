@@ -44,8 +44,3 @@ pub fn onetime_file() -> Result<PathBuf> {
 pub fn unattended_file() -> Result<PathBuf> {
     Ok(config_dir()?.join("unattended.key"))
 }
-
-/// Viewer ishonchli Host'lar ro'yxati.
-pub fn known_hosts_file() -> Result<PathBuf> {
-    Ok(config_dir()?.join("known_hosts"))
-}
