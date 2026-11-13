@@ -2,7 +2,7 @@
 //! (ID, qabul qilish rejimi, ishonchli ro'yxat), server rejimi (ulangan clientlar, firewall) va kiruvchi
 //! so'rov dialogi. Hammasi `rdcore::relay` ustida.
 
-use super::{ondemand, firewall, theme};
+use super::{ondemand, firewall, secrets, theme};
 use egui::{Align, Align2, Key, Layout, RichText, Ui};
 use rdcore::{
     auth::Credentials,
@@ -234,6 +234,8 @@ struct Incoming {
 pub struct ConnectRequest {
     pub id: String,
     pub password: String,
+    /// Kalit to'g'ri chiqsa faqat shu ID uchun xavfsiz saqlansin (`secrets`).
+    pub save_key: bool,
 }
 
 pub struct RelayPanel {
@@ -247,6 +249,12 @@ pub struct RelayPanel {
     incoming: VecDeque<Incoming>,
     target: String,
     password: String,
+    /// "Saqlash" belgisi: kalit faqat shu ID uchun saqlanadi.
+    save_key: bool,
+    /// Saqlangan kalit qaysi ID uchun yuklangan (ID o'zgarganda qayta yuklanadi).
+    key_loaded_for: String,
+    /// Kalit maydoni saqlangan kalitdan to'ldirilgan (ID almashsa u boshqa Host'ga yuborilmasligi uchun tozalanadi).
+    key_autofilled: bool,
     error: Option<String>,
     show_key: bool,
     /// Qarovsiz parol maydoni (saqlangach tozalanadi) va uning holati.
@@ -289,6 +297,9 @@ impl RelayPanel {
             incoming: VecDeque::new(),
             target: String::new(),
             password: String::new(),
+            save_key: false,
+            key_loaded_for: String::new(),
+            key_autofilled: false,
             error: None,
             show_key: false,
             unattended_pw: String::new(),
@@ -358,6 +369,31 @@ impl RelayPanel {
         self.contacts.push(Contact { id: id.to_string(), name });
         save_contacts(&self.contacts);
         self.subscribe();
+    }
+
+    /// ID o'zgargan bo'lsa shu ID uchun saqlangan kalitni maydonga qo'yadi. Avvalgi ID ning saqlangan kaliti
+    /// boshqa ID ga yuborilmasligi uchun tozalanadi; qo'lda yozilgan kalitga tegilmaydi.
+    fn sync_saved_key(&mut self) {
+        let id = relay::normalize_id(&self.target);
+        if id == self.key_loaded_for {
+            return;
+        }
+        self.key_loaded_for = id.clone();
+        let saved = relay::valid_id(&id).then(|| secrets::get(&secrets::id_key(&id))).flatten();
+        match saved {
+            Some(pw) => {
+                self.password = pw;
+                self.save_key = true;
+                self.key_autofilled = true;
+            }
+            None => {
+                if self.key_autofilled {
+                    self.password.clear();
+                }
+                self.save_key = false;
+                self.key_autofilled = false;
+            }
+        }
     }
 
     // --- agent --------------------------------------------------------------------------------
@@ -631,15 +667,20 @@ impl RelayPanel {
             save_contacts(&self.contacts);
         }
         if let Some(i) = delete {
-            self.contacts.remove(i);
+            let removed = self.contacts.remove(i);
+            secrets::delete(&secrets::id_key(&removed.id));
+            if removed.id == self.key_loaded_for {
+                self.key_loaded_for.clear(); // maydon qayta sinxronlanadi (saqlangan kalit endi yo'q)
+            }
             save_contacts(&self.contacts);
             self.subscribe();
         }
         let (id, connect) = pick?;
         self.target = relay::pretty_id(&id);
+        self.sync_saved_key();
         (connect && self.online).then(|| {
             self.error = None;
-            ConnectRequest { id, password: self.password.clone() }
+            ConnectRequest { id, password: self.password.clone(), save_key: self.save_key }
         })
     }
 
@@ -677,9 +718,25 @@ impl RelayPanel {
                 enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                 ui.end_row();
                 ui.label(theme::dim("Kalit"));
-                ui.add(theme::input(&mut self.password).password(true).hint_text("agar kerak bo'lsa"));
+                ui.horizontal(|ui| {
+                    let r = ui.add(
+                        theme::input(&mut self.password)
+                            .password(true)
+                            .hint_text("agar kerak bo'lsa")
+                            .desired_width(theme::FIELD_W - 90.0),
+                    );
+                    if r.changed() {
+                        self.key_autofilled = false; // endi foydalanuvchi yozgan kalit
+                    }
+                    ui.add_enabled_ui(secrets::available(), |ui| {
+                        ui.checkbox(&mut self.save_key, "Saqlash")
+                            .on_hover_text("Kalit faqat shu ID uchun, shifrlangan holda saqlanadi")
+                            .on_disabled_hover_text("Tizim kalit ombori mavjud emas");
+                    });
+                });
                 ui.end_row();
             });
+            self.sync_saved_key();
             ui.add_space(6.0);
             let id = relay::normalize_id(&self.target);
             let can = relay::valid_id(&id) && self.online;
@@ -703,7 +760,7 @@ impl RelayPanel {
             }
             if theme::accent_button(ui, "Ulanish", egui::vec2(160.0, 34.0), can).clicked() || (enter && can) {
                 self.error = None;
-                request = Some(ConnectRequest { id, password: self.password.clone() });
+                request = Some(ConnectRequest { id, password: self.password.clone(), save_key: self.save_key });
             }
         });
         if reconnect {

@@ -249,6 +249,13 @@ class ViewerActivity : Activity(), KeySink {
     private fun handleEvent(f: List<String>) {
         when (f[0]) {
             "connected" -> {
+                // Kalit to'g'ri: belgilangan bo'lsa faqat shu ulanish uchun saqlanadi, aks holda eski yozuv o'chiriladi
+                val conn = intent.getStringExtra("conn").orEmpty()
+                if (conn.isNotEmpty()) {
+                    val keys = SavedKeys(this)
+                    if (intent.getBooleanExtra("saveKey", false)) keys.set(conn, intent.getStringExtra("password").orEmpty())
+                    else keys.delete(conn)
+                }
                 if (p2pAddr.isNotEmpty()) {
                     settings.addP2pHost(p2pAddr)
                 } else {

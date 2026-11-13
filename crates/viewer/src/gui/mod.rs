@@ -362,7 +362,7 @@ impl App {
         self.tex = None;
         self.fwd = input::Forwarder::default();
         self.relay_target = Some(req.id.clone());
-        self.pending_key = None;
+        self.pending_key = Some((secrets::id_key(&req.id), req.password.clone(), req.save_key));
         self.handle = Some(session::start(
             ctx.clone(),
             session::Params {
@@ -472,20 +472,25 @@ impl App {
         }
         if connected {
             // parol to'g'ri, Host ishonchli: ro'yxatga saqlanadi (yoki sozlamalari yangilanadi)
-            match self.relay_target.clone() {
-                Some(id) => self.relay.remember_contact(&id),
+            // P2P da kalit faqat Host ro'yxatga saqlansa saqlanadi; ID kontaktlarga har doim saqlanadi
+            let listed = match self.relay_target.clone() {
+                Some(id) => {
+                    self.relay.remember_contact(&id);
+                    true
+                }
                 None => {
                     self.remember_host();
-                    // Kalit to'g'ri: belgilangan bo'lsa faqat shu ulanish uchun saqlanadi, aks holda eski yozuv o'chiriladi
-                    if let Some((conn, pw, save)) = self.pending_key.take() {
-                        if save && self.form.save {
-                            if let Err(e) = secrets::set(&conn, &pw) {
-                                eprintln!("{e}");
-                            }
-                        } else {
-                            secrets::delete(&conn);
-                        }
+                    self.form.save
+                }
+            };
+            // Kalit to'g'ri: belgilangan bo'lsa faqat shu ulanish uchun saqlanadi, aks holda eski yozuv o'chiriladi
+            if let Some((conn, pw, save)) = self.pending_key.take() {
+                if save && listed {
+                    if let Err(e) = secrets::set(&conn, &pw) {
+                        eprintln!("{e}");
                     }
+                } else {
+                    secrets::delete(&conn);
                 }
             }
         }

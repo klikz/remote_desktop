@@ -4,11 +4,14 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -33,6 +36,13 @@ class MainActivity : Activity() {
     private lateinit var nameEdit: EditText
     private lateinit var idEdit: EditText
     private lateinit var passEdit: EditText
+    private lateinit var saveKeyBox: CheckBox
+    private lateinit var savedKeys: SavedKeys
+    /** Saqlangan kalit qaysi ulanish uchun yuklangan (ID/manzil o'zgarganda qayta yuklanadi). */
+    private var keyLoadedFor: String? = null
+    /** Kalit maydoni saqlangan kalitdan to'ldirilgan: ulanish almashsa u boshqa Host'ga yuborilmasligi uchun tozalanadi. */
+    private var keyAutofilled = false
+    private var settingPass = false
     private lateinit var addrEdit: EditText
     private lateinit var descLabel: TextView
     private lateinit var modeRelayBtn: android.widget.Button
@@ -57,6 +67,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = Settings(this)
+        savedKeys = SavedKeys(this)
         Native.init(filesDir.absolutePath)
         p2pMode = settings.p2p
         fps = settings.fps
@@ -117,6 +128,20 @@ class MainActivity : Activity() {
         idEdit = edit("9 xonali ID", settings.lastTarget, InputType.TYPE_CLASS_NUMBER)
         addrEdit = edit("Host manzili (IP yoki nom[:port])", settings.lastAddr, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
         passEdit = edit("Kalit (agar kerak bo'lsa)", "", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        saveKeyBox = CheckBox(this).apply {
+            text = "Saqlash"
+            setTextColor(Colors.TEXT)
+            buttonTintList = android.content.res.ColorStateList.valueOf(Colors.ACCENT)
+        }
+        val passRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(passEdit, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(saveKeyBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8) })
+        }
+        idEdit.addTextChangedListener(watcher { syncSavedKey() })
+        addrEdit.addTextChangedListener(watcher { syncSavedKey() })
+        passEdit.addTextChangedListener(watcher { if (!settingPass) keyAutofilled = false })
         descLabel = label("", 12f, Colors.DIM)
         modeRelayBtn = button("Server orqali") { setMode(false) }
         modeP2pBtn = button("P2P") { setMode(true) }
@@ -153,7 +178,7 @@ class MainActivity : Activity() {
                 descLabel,
                 idEdit,
                 addrEdit,
-                passEdit,
+                passRow,
                 label("Sifat", 13f, Colors.DIM),
                 presetGroup,
                 button("Qo'shimcha sozlamalar") {
@@ -314,6 +339,55 @@ class MainActivity : Activity() {
         contactsCard.visibility = if (p2pMode) View.GONE else View.VISIBLE
         p2pCard.visibility = if (p2pMode) View.VISIBLE else View.GONE
         refreshP2pHosts()
+        syncSavedKey()
+    }
+
+    private fun watcher(onChange: () -> Unit) = object : TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+        override fun afterTextChanged(s: Editable?) = onChange()
+    }
+
+    /** Joriy rejim va maydonlarga mos ulanish yozuvi (`p2p:manzil` yoki `id:123456789`); to'liq bo'lmasa null. */
+    private fun currentConn(): String? = if (p2pMode) {
+        addrEdit.text.toString().trim().takeIf { it.isNotEmpty() }?.let(SavedKeys::p2pKey)
+    } else {
+        idEdit.text.toString().trim().takeIf { it.length == 9 && it.all(Char::isDigit) }?.let(SavedKeys::idKey)
+    }
+
+    private fun setPass(text: String) {
+        settingPass = true
+        passEdit.setText(text)
+        settingPass = false
+    }
+
+    /**
+     * Ulanish o'zgargan bo'lsa shu ulanish uchun saqlangan kalitni maydonga qo'yadi. Avvalgi ulanishning saqlangan
+     * kaliti boshqa Host'ga yuborilmasligi uchun tozalanadi; qo'lda yozilgan kalitga tegilmaydi.
+     */
+    private fun syncSavedKey() {
+        val conn = currentConn()
+        if (conn == keyLoadedFor) return
+        keyLoadedFor = conn
+        val saved = conn?.let(savedKeys::get)
+        if (saved != null) {
+            setPass(saved)
+            saveKeyBox.isChecked = true
+            keyAutofilled = true
+        } else {
+            if (keyAutofilled) setPass("")
+            saveKeyBox.isChecked = false
+            keyAutofilled = false
+        }
+    }
+
+    /** Ro'yxatdan o'chirilgan ulanishning saqlangan kaliti ham o'chiriladi. */
+    private fun forgetKey(conn: String) {
+        savedKeys.delete(conn)
+        if (conn == keyLoadedFor) {
+            keyLoadedFor = null
+            syncSavedKey()
+        }
     }
 
     private fun refreshP2pHosts() {
@@ -331,6 +405,7 @@ class MainActivity : Activity() {
                 AlertDialog.Builder(this).setMessage("$a manzilini o'chirish?")
                     .setPositiveButton("O'chirish") { _, _ ->
                         settings.p2pHosts = settings.p2pHosts.filter { it != a }
+                        forgetKey(SavedKeys.p2pKey(a))
                         refreshP2pHosts()
                     }.setNegativeButton("Bekor", null).show()
                 true
@@ -358,6 +433,7 @@ class MainActivity : Activity() {
                 AlertDialog.Builder(this).setMessage("${c.id} kontaktini o'chirish?")
                     .setPositiveButton("O'chirish") { _, _ ->
                         settings.contacts = settings.contacts.filter { it.id != c.id }
+                        forgetKey(SavedKeys.idKey(c.id))
                         AgentManager.subscribe()
                         refreshContacts()
                     }.setNegativeButton("Bekor", null).show()
@@ -385,6 +461,8 @@ class MainActivity : Activity() {
             Intent(this, ViewerActivity::class.java)
                 .putExtra("addr", addr)
                 .putExtra("password", passEdit.text.toString())
+                .putExtra("conn", SavedKeys.p2pKey(addr))
+                .putExtra("saveKey", saveKeyBox.isChecked)
                 .putExtra("fps", fps)
                 .putExtra("kbps", kbps)
                 .putExtra("height", height),
@@ -412,6 +490,8 @@ class MainActivity : Activity() {
             Intent(this, ViewerActivity::class.java)
                 .putExtra("id", id)
                 .putExtra("password", passEdit.text.toString())
+                .putExtra("conn", SavedKeys.idKey(id))
+                .putExtra("saveKey", saveKeyBox.isChecked)
                 .putExtra("fps", fps)
                 .putExtra("kbps", kbps)
                 .putExtra("height", height),
