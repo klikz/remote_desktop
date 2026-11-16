@@ -8,8 +8,11 @@ use std::{
     io::Read,
     path::PathBuf,
     sync::mpsc,
-    time::Duration,
+    time::{Duration, Instant},
 };
+
+/// Dialog shuncha vaqtdan keyin o'zi yopiladi (avtostartda foydalanuvchi bo'lmasa ham dastur ishlashda davom etadi).
+const AUTO_CLOSE: Duration = Duration::from_secs(15);
 
 const API: &str = "http://cloud.hubnode.uz:8780/api/public";
 const TIMEOUT: Duration = Duration::from_secs(6);
@@ -41,6 +44,8 @@ pub struct Welcome {
     rx: mpsc::Receiver<Msg>,
     /// Hali javobi kelmagan so'rovlar soni.
     pending: u8,
+    /// Dialog birinchi marta chizilgan vaqt (avtomatik yopilish hisobi shundan boshlanadi).
+    shown_at: Option<Instant>,
 }
 
 fn cache_path(name: &str) -> Option<PathBuf> {
@@ -179,7 +184,7 @@ impl Welcome {
                 ctx.request_repaint();
             });
         }
-        Welcome { info, banner, rx, pending: jobs.len() as u8 }
+        Welcome { info, banner, rx, pending: jobs.len() as u8, shown_at: None }
     }
 
     fn poll(&mut self, ctx: &Context) {
@@ -221,6 +226,12 @@ impl Welcome {
         if !loading && !self.has_content() {
             return false;
         }
+        let left = AUTO_CLOSE.saturating_sub(self.shown_at.get_or_insert_with(Instant::now).elapsed());
+        if left.is_zero() {
+            return false;
+        }
+        // Sanoq uchun soniyada bir marta (faqat dialog ochiq turganda)
+        ctx.request_repaint_after(Duration::from_secs(1));
         let mut open = true;
         let screen = ctx.screen_rect();
         egui::Window::new("Ulan")
@@ -246,7 +257,8 @@ impl Welcome {
                     self.body(ui, screen.height());
                 });
                 ui.add_space(12.0);
-                if theme::accent_button(ui, "Davom etish", egui::vec2(ui.available_width(), 34.0), true).clicked() {
+                let label = format!("Davom etish ({})", left.as_secs_f32().ceil() as u64);
+                if theme::accent_button(ui, &label, egui::vec2(ui.available_width(), 34.0), true).clicked() {
                     open = false;
                 }
             });

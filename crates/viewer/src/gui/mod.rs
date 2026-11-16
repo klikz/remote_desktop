@@ -228,7 +228,7 @@ impl App {
             files: Files::default(),
             start_minimized: minimized,
             host: hostpanel::HostPanel::new(),
-            relay: relaypanel::RelayPanel::new(),
+            relay: relaypanel::RelayPanel::new(&cc.egui_ctx),
             relay_target: None,
             screen: Screen::Form,
             hosts,
@@ -1165,6 +1165,10 @@ impl eframe::App for App {
             Screen::Form => self.ui_form(ctx),
             Screen::Connecting => self.ui_connecting(ctx),
             Screen::Viewing => self.ui_viewing(ctx),
+        }
+        // Kiruvchi so'rov bo'lsa welcome yopiladi: "Ulanish so'rovi" oynasini to'sib qo'ymasin
+        if self.relay.has_incoming() {
+            self.welcome = None;
         }
         if self.welcome.as_mut().is_some_and(|w| !w.show(ctx)) {
             self.welcome = None;

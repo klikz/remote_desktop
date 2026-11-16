@@ -278,7 +278,9 @@ pub struct RelayPanel {
 }
 
 impl RelayPanel {
-    pub fn new() -> Self {
+    /// `ctx` darhol saqlanadi: agent waker'i birinchi kadrni kutmasdan o'rnatiladi (oyna yig'ilgan/yashirin
+    /// ochilganda `update()` chaqirilmasa ham kiruvchi so'rov oynani uyg'otadi).
+    pub fn new(ctx: &egui::Context) -> Self {
         let first_run = !ClientCfg::exists();
         let cfg = ClientCfg::load();
         if first_run {
@@ -313,7 +315,7 @@ impl RelayPanel {
             server_error: None,
             fw_rx: None,
             fw_msg: None,
-            ctx: None,
+            ctx: Some(ctx.clone()),
             waker_set: false,
         };
         if p.server_on {
@@ -488,8 +490,12 @@ impl RelayPanel {
             if matches!(e, AgentEvent::Incoming { .. }) {
                 super::tray::show_window();
             }
+            // Linux: yig'ilgan oyna (Ubuntu avtostarti) so'rov kelganda ochiladi
             #[cfg(not(windows))]
-            let _ = e;
+            if matches!(e, AgentEvent::Incoming { .. }) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
             ctx.request_repaint();
         }));
         self.waker_set = true;
