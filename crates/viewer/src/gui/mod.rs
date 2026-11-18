@@ -31,6 +31,9 @@ use std::{
 /// `minimized`: oyna yig'ilgan holda ochiladi (kirishda avtostart).
 pub fn run(minimized: bool) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
+        // Wayland'da yig'ilgan oynaga frame callback kelmaydi: vsync bilan swap cheksiz bloklanib UI to'xtaydi
+        // (avtostartda kiruvchi so'rov dialogi chiqmaydi). Ilova reaktiv chiziladi, CPU sarfi oshmaydi.
+        vsync: !cfg!(target_os = "linux"),
         viewport: egui::ViewportBuilder::default()
             .with_title("Ulan")
             .with_inner_size([1100.0, 720.0])

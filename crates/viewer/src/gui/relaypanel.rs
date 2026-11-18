@@ -490,7 +490,8 @@ impl RelayPanel {
             if matches!(e, AgentEvent::Incoming { .. }) {
                 super::tray::show_window();
             }
-            // Linux: yig'ilgan oyna (Ubuntu avtostarti) so'rov kelganda ochiladi
+            // Linux: yig'ilgan oyna (Ubuntu avtostarti) so'rov kelganda ochiladi. Buyruq keyingi kadrda bajariladi —
+            // bu yig'ilgan oynada ham kadr chizilishiga tayanadi (`gui::run` da Linux'da vsync o'chirilgan).
             #[cfg(not(windows))]
             if matches!(e, AgentEvent::Incoming { .. }) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
